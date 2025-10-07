@@ -1,0 +1,282 @@
+---
+title: "467 project"
+author: "Jason Leff, Josie Dieu"
+date: "2025-03-26"
+output:
+  pdf_document: default
+  html_document: default
+---
+Many items of this document are commented out for the sake of readability and printing time.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(dplyr)
+```
+
+```{r}
+data <- read_csv("best_df.csv")
+```
+```{r}
+library(dplyr)
+
+data <- data %>%
+  mutate(across(contains("COL"), ~ {
+    x_numeric <- as.numeric(as.character(.x))
+    replace_na(x_numeric, 0)  # Replace NA (or NaN) with 0
+  }))
+
+data
+```
+```{r}
+#fullmod <- lm(NBA_PPG~POSITION+WEIGHT+HEIGHT_INCH+COL_G+COL_GS+COL_MP+COL_MPG+COL_PPG+COL_PPM+COL_FGPG+COL_FGAPG+COL_2PPG+COL_2PAPG+COL_3PPG+COL_3PAPG+COL_FTPG+COL_FTAPG+COL_ORBPG+COL_DRBPG+COL_TRBPG+COL_ASTPG+COL_STLPG+COL_BLKPG+COL_TOVPG+COL_PFPG+COL_FGpct+COL_2Ppct+COL_3Ppct+COL_FTpct+COL_FG_pct_inc+COL_3P_pct_inc+COL_2P_pct_inc+COL_FT_pct_inc,data)
+#anova(fullmod)
+```
+```{r}
+library(ggplot2)
+
+# Convert POSITION to factor (if not already)
+data$POSITION <- as.factor(data$POSITION)
+
+# Create the plot with controlled x-axis limits
+ggplot(data, aes(x = POSITION, y = NBA_PPG)) +
+  geom_boxplot() +  # Or geom_violin()/geom_jitter() for other views
+  scale_x_discrete(limits = levels(data$POSITION)) +  # Ensures finite xlim
+  labs(x = "Position", y = "NBA Points Per Game (PPG)")
+```
+```{r}
+#sunit_lm<-lm(NBA_PPG~POSITION+WEIGHT+HEIGHT_INCH+COL_G+COL_GS+COL_MP+COL_MPG+COL_PPG+COL_PPM+COL_FGPG+COL_FGAPG+COL_2PPG+COL_2PAPG+COL_3PPG+COL_3PAPG+COL_FTPG+COL_FTAPG+COL_ORBPG+COL_DRBPG+COL_TRBPG+COL_ASTPG+COL_STLPG+COL_BLKPG+COL_TOVPG+COL_PFPG+COL_FGpct+COL_2Ppct+COL_3Ppct+COL_FTpct+COL_FG_pct_inc+COL_3P_pct_inc+COL_2P_pct_inc+COL_FT_pct_inc,data=data)
+#step(sunit_lm,direction="backward",k=2)
+
+#n<-nrow(data)
+#step(sunit_lm,direction="backward",k=log(n))
+
+```
+```{r}
+#newlmod <- lm(formula = NBA_PPG ~ (POSITION + WEIGHT + COL_G + COL_GS + COL_MP + 
+    #COL_MPG + COL_PPG + COL_PPM + COL_ORBPG + COL_DRBPG + COL_TRBPG + 
+    #COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc)^2, data = data)
+#anova(newlmod)
+```
+
+```{r}
+#finalmod <- lm(formula = NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MP + 
+    #COL_MPG + COL_PPG + COL_PPM + COL_ORBPG + COL_DRBPG + COL_TRBPG + 
+    #COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc, data = data)
+#summary(finalmod)
+```
+```{r}
+#plot(residuals(finalmod) ~fitted(finalmod), pch=unclass(data$POSITION), xlab="Fitted",ylab="Residuals")
+#abline(h=0)
+#qqnorm(resid(finalmod))
+#qqline(resid(finalmod))
+```
+
+
+
+
+
+
+```{r}
+#sunit_lm<-lm(NBA_PPG~POSITION+WEIGHT+HEIGHT_INCH+COL_G+COL_GS+COL_MP+COL_MPG+COL_PPG+COL_PPM+COL_FGPG+COL_FGAPG+COL_2PPG+COL_2PAPG+COL_3PPG+COL_3PAPG+COL_FTPG+COL_FTAPG+COL_ORBPG+COL_DRBPG+COL_TRBPG+COL_ASTPG+COL_STLPG+COL_BLKPG+COL_TOVPG+COL_PFPG+COL_FGpct+COL_2Ppct+COL_3Ppct+COL_FTpct+COL_FG_pct_inc+COL_3P_pct_inc+COL_2P_pct_inc+COL_FT_pct_inc,data=data)
+
+
+#n<-nrow(data)
+#step(sunit_lm,direction="backward",k=log(n))
+```
+
+```{r}
+compmod <- lm(formula = NBA_PPG ~ WEIGHT + COL_G + COL_GS + COL_MP + COL_ORBPG + 
+    COL_DRBPG + COL_TRBPG + COL_FTpct + COL_FT_pct_inc, data = data)
+
+#anova(compmod, finalmod)
+```
+
+
+#old code
+compmod_data <- data.frame(
+  WEIGHT = mean(data$WEIGHT, na.rm = TRUE),
+  COL_G = mean(data$COL_G, na.rm = TRUE),
+  COL_GS = mean(data$COL_GS, na.rm = TRUE),
+  COL_MP = mean(data$COL_MP, na.rm = TRUE),
+  COL_ORBPG = mean(data$COL_ORBPG, na.rm = TRUE),
+  COL_DRBPG = mean(data$COL_DRBPG, na.rm = TRUE),
+  COL_TRBPG = mean(data$COL_TRBPG, na.rm = TRUE),
+  COL_FTpct = mean(data$COL_FTpct, na.rm = TRUE),
+  COL_FT_pct_inc = mean(data$COL_FT_pct_inc, na.rm = TRUE)
+)
+
+data$POSITION <- as.factor(data$POSITION)
+
+
+positions <- levels(data$POSITION)
+position_cis <- list()
+
+for(pos in positions) {
+  finalmod_data <- data.frame(
+    POSITION = pos,
+    WEIGHT = mean(data$WEIGHT, na.rm = TRUE),
+    COL_G = mean(data$COL_G, na.rm = TRUE),
+    COL_GS = mean(data$COL_GS, na.rm = TRUE),
+    COL_MP = mean(data$COL_MP, na.rm = TRUE),
+    COL_MPG = mean(data$COL_MPG, na.rm = TRUE),
+    COL_PPG = mean(data$COL_PPG, na.rm = TRUE),
+    COL_PPM = mean(data$COL_PPM, na.rm = TRUE),
+    COL_ORBPG = mean(data$COL_ORBPG, na.rm = TRUE),
+    COL_DRBPG = mean(data$COL_DRBPG, na.rm = TRUE),
+    COL_TRBPG = mean(data$COL_TRBPG, na.rm = TRUE),
+    COL_FGpct = mean(data$COL_FGpct, na.rm = TRUE),
+    COL_3Ppct = mean(data$COL_3Ppct, na.rm = TRUE),
+    COL_FTpct = mean(data$COL_FTpct, na.rm = TRUE),
+    COL_FT_pct_inc = mean(data$COL_FT_pct_inc, na.rm = TRUE)
+  )
+  
+  ci <- predict(finalmod, finalmod_data, interval = "confidence", level = 0.95)
+
+  position_cis[[pos]] <- data.frame(
+    Position = pos,
+    Fit = ci[1],
+    Lower = ci[2],
+    Upper = ci[3]
+  )
+}
+results_df <- do.call(rbind, position_cis)
+results_df
+
+compmod_CI <- predict(compmod, compmod_data, interval = "confidence", level = 0.95)
+print("Comparison model Confidence interval:")
+compmod_CI
+print("Sample Mean:")
+mean(data$NBA_PPG, na.rm = TRUE)
+```{r}
+#numeric_vars <- c("WEIGHT", "COL_G", "COL_GS", "COL_MP", "COL_MPG", 
+                  #"COL_PPG", "COL_PPM", "COL_ORBPG", "COL_DRBPG", "COL_TRBPG",
+                  #"COL_FGpct", "COL_3Ppct", "COL_FTpct", "COL_FT_pct_inc")
+#cor_matrix <- cor(data[, numeric_vars]) 
+#cor_matrix
+```
+Issues: COL_G and COL_MP 0.93, COL_PPG and COL_PPM 0.81, COL_ORBPG and COL_TRBPG 0.87, COL_DRBPG and COL_TRBPG 0.95
+```{r}
+#library(car)
+#vifmod <- lm(formula = NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MP + 
+    #COL_MPG + COL_PPG + COL_PPM + COL_ORBPG + COL_DRBPG + COL_TRBPG + 
+    #COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc, data = data)
+#vif(vifmod)
+```
+The main issue is clearly with the rebound values, all above 190. There are also minor issues of values between 2-10, between COL_G and COL_MP, and COL_PPG and COL_PPM, and COL_MPG should be fixed by removing the collinear columns. 
+
+```{r}
+vifmod2 <- lm(NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MPG + COL_PPM + COL_ORBPG + COL_DRBPG 
+              + COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc,data=data)
+vif(vifmod2)
+```
+```{r}
+numeric_vars <- c("WEIGHT", "COL_G", "COL_GS", "COL_MPG", 
+                  "COL_PPM", "COL_ORBPG", "COL_DRBPG", 
+                  "COL_FGpct", "COL_3Ppct", "COL_FTpct", "COL_FT_pct_inc")
+cor_matrix <- cor(data[, numeric_vars]) 
+cor_matrix
+```
+```{r}
+new_fullmod <- lm(NBA_PPG ~ (POSITION + WEIGHT + COL_G + COL_GS + COL_MPG + COL_PPM + COL_ORBPG + COL_DRBPG +
+                  COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc)^2,data=data)
+anova(new_fullmod)
+```
+
+
+
+```{r}
+new_finalmod <- lm(NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MPG + COL_PPM + COL_ORBPG + COL_DRBPG + 
+                  COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc,data=data)
+summary(new_finalmod)
+```
+```{r}
+plot(residuals(new_finalmod) ~fitted(new_finalmod), pch=unclass(data$POSITION), xlab="Fitted",ylab="Residuals")
+abline(h=0)
+qqnorm(resid(new_finalmod))
+qqline(resid(new_finalmod))
+```
+
+```{r}
+compmod<- lm(NBA_PPG~WEIGHT+COL_G+COL_GS+COL_MP+COL_ORBPG+COL_DRBPG+COL_FTpct+COL_FT_pct_inc,data=data) #choosing to remove COL_TRBPG knowing there was a high correlation value/VIF in the previous model
+```
+
+```{r}
+compmod_data <- data.frame(
+  WEIGHT = mean(data$WEIGHT, na.rm = TRUE),
+  COL_G = mean(data$COL_G, na.rm = TRUE),
+  COL_GS = mean(data$COL_GS, na.rm = TRUE),
+  COL_MP = mean(data$COL_MP, na.rm = TRUE),
+  COL_ORBPG = mean(data$COL_ORBPG, na.rm = TRUE),
+  COL_DRBPG = mean(data$COL_DRBPG, na.rm = TRUE),
+  COL_FTpct = mean(data$COL_FTpct, na.rm = TRUE),
+  COL_FT_pct_inc = mean(data$COL_FT_pct_inc, na.rm = TRUE)
+)
+
+data$POSITION <- as.factor(data$POSITION)
+
+
+positions <- levels(data$POSITION)
+position_cis <- list()
+
+for(pos in positions) {
+  finalmod_data <- data.frame(
+    POSITION = pos,
+    WEIGHT = mean(data$WEIGHT, na.rm = TRUE),
+    COL_G = mean(data$COL_G, na.rm = TRUE),
+    COL_GS = mean(data$COL_GS, na.rm = TRUE),
+    COL_MPG = mean(data$COL_MPG, na.rm = TRUE),
+    COL_PPM = mean(data$COL_PPM, na.rm = TRUE),
+    COL_ORBPG = mean(data$COL_ORBPG, na.rm = TRUE),
+    COL_DRBPG = mean(data$COL_DRBPG, na.rm = TRUE),
+    COL_FGpct = mean(data$COL_FGpct, na.rm = TRUE),
+    COL_3Ppct = mean(data$COL_3Ppct, na.rm = TRUE),
+    COL_FTpct = mean(data$COL_FTpct, na.rm = TRUE),
+    COL_FT_pct_inc = mean(data$COL_FT_pct_inc, na.rm = TRUE)
+  )
+  
+  ci <- predict(new_finalmod, finalmod_data, interval = "confidence", level = 0.95)
+
+  position_cis[[pos]] <- data.frame(
+    Position = pos,
+    Fit = ci[1],
+    Lower = ci[2],
+    Upper = ci[3]
+  )
+}
+results_df <- do.call(rbind, position_cis)
+results_df
+
+compmod_CI <- predict(compmod, compmod_data, interval = "confidence", level = 0.95)
+print("Comparison model Confidence interval:")
+compmod_CI
+print("Sample Mean:")
+mean(data$NBA_PPG, na.rm = TRUE)
+```
+```{r}
+anova(compmod,new_finalmod)
+```
+```{r}
+ols_model <- lm(NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MPG + COL_PPM + COL_ORBPG + COL_DRBPG + 
+                COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc, data=data)
+
+data$weights <- 1 / (residuals(ols_model)^2)
+wls_model <- lm(NBA_PPG ~ POSITION + WEIGHT + COL_G + COL_GS + COL_MPG + COL_PPM + COL_ORBPG + COL_DRBPG + 
+                COL_FGpct + COL_3Ppct + COL_FTpct + COL_FT_pct_inc, data=data, weights=data$weights)
+
+summary(wls_model)
+
+```
+```{r}
+plot(data$weights*residuals(wls_model) ~ fitted(wls_model), 
+     pch=unclass(data$POSITION), 
+     xlab="Fitted", ylab="Weighted Residuals")
+abline(h=0)
+
+qqnorm(residuals(wls_model))
+qqline(residuals(wls_model))
+```
+
+
+

@@ -1,0 +1,171 @@
+---
+title: "Thesis"
+author: "Jason Leff"
+date: "2025-09-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(scatterplot3d)
+```
+```{r}
+data <- read.csv('data_with_pre_data.csv')
+```
+```{r}
+head(data)
+```
+
+# Simple Linear Model Predicting 3 Point Percentage from Pre-NBA Free Throw Percentage
+```{r}
+FTto3 <- lm(NBA_FG3_PCT ~ PRE_FT_PCT, data = data)
+summary(FTto3)
+```
+```{r}
+plot(data$PRE_FT_PCT,data$NBA_FG3_PCT)
+```
+```{r}
+ggplot(data, aes(x = PRE_FT_PCT, y = NBA_FG3_PCT)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red") +
+  labs(x = "PRE_FT_PCT", y = "NBA_FG3_PCT") +
+  theme_minimal()
+```
+```{r}
+data_filtered <- data %>%
+  filter(PRE_FTA > 25 & NBA_FG3A > 25)
+
+ggplot(data_filtered, aes(x = PRE_FT_PCT, y = NBA_FG3_PCT)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "red", alpha = 0.2) +
+  labs(
+    x = "Pre-NBA Free Throw Percentage", 
+    y = "NBA 3-Point Percentage",
+    title = "Free Throw % vs 3-Point % (Min. 25 Attempts Each)",
+    subtitle = paste("n =", nrow(data_filtered), "players")
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+
+
+# Simple Linear Model Predicting 3 Point Percentage from Pre-NBA 3 Point Percentage
+```{r}
+Pre3toNBA3 <- lm(NBA_FG3_PCT ~ PRE_3P_PCT, data = data)
+summary(Pre3toNBA3)
+```
+
+```{r}
+data_filtered <- data %>%
+  filter(PRE_3PA > 25 & NBA_FG3A > 25)
+
+ggplot(data_filtered, aes(x = PRE_3P_PCT, y = NBA_FG3_PCT, color = PRE_COL_or_INT)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", alpha = 0.05) +
+  labs(
+    x = "Pre-NBA Three Point Percentage", 
+    y = "NBA 3-Point Percentage",
+    title = "Pre-NBA 3-Point % vs NBA 3-Point % (Min. 25 Attempts Each)",
+    subtitle = paste("n =", nrow(data_filtered), "players")
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+```
+#ANOVA INTERNATIONAL VS COLLEGE
+# MLR of both PRE-NBA FT% and 3P% vs NBA 3P%
+```{r}
+FT3P_to_NBA3 <- lm(NBA_FG3_PCT ~ PRE_3P_PCT+PRE_FT_PCT, data=data)
+summary(FT3P_to_NBA3)
+```
+```{r}
+clean_data <- na.omit(data[c("NBA_FG3_PCT", "PRE_3P_PCT", "PRE_FT_PCT", "PRE_COL_or_INT")])
+model <- lm(NBA_FG3_PCT ~ PRE_3P_PCT + PRE_FT_PCT, data = clean_data)
+
+color_factor <- as.factor(clean_data$PRE_COL_or_INT)
+colors <- rainbow(length(levels(color_factor)))[color_factor]
+s3d <- scatterplot3d(clean_data$PRE_3P_PCT, clean_data$PRE_FT_PCT, clean_data$NBA_FG3_PCT,
+                     color = colors, pch = 16,
+                     xlab = "Pre-3P%", ylab = "Pre-FT%", zlab = "NBA 3P%",
+                     main = "Colored by PRE_COL_OR_INT")
+s3d$plane3d(model, lty.box = "solid")
+
+legend("topright", legend = levels(color_factor), 
+       col = rainbow(length(levels(color_factor))), pch = 16)
+```
+# MLR of both PRE-NBA FT% and 3P% vs NBA 3P% filtered for 25 attempts
+```{r}
+data_filtered2 <- data %>%
+  filter(PRE_3PA >= 25 & PRE_FTA >= 25 & NBA_FG3A >= 25)
+
+clean_data <- na.omit(data_filtered2[c("NBA_FG3_PCT", "PRE_3P_PCT", "PRE_FT_PCT", "PRE_COL_or_INT")])
+model <- lm(NBA_FG3_PCT ~ PRE_3P_PCT + PRE_FT_PCT, data = clean_data)
+summary(model)
+
+color_factor <- as.factor(clean_data$PRE_COL_or_INT)
+colors <- rainbow(length(levels(color_factor)))[color_factor]
+s3d <- scatterplot3d(clean_data$PRE_3P_PCT, clean_data$PRE_FT_PCT, clean_data$NBA_FG3_PCT,
+                     color = colors, pch = 16,
+                     xlab = "Pre-3P%", ylab = "Pre-FT%", zlab = "NBA 3P%",
+                     main = "Colored by PRE_COL_OR_INT")
+s3d$plane3d(model, lty.box = "solid")
+
+legend("topright", legend = levels(color_factor), 
+       col = rainbow(length(levels(color_factor))), pch = 16)
+```
+# Classification of Shooting Ability in the NBA
+```{r}
+data$NBA_3PPG <- data$NBA_FG3M / data$NBA_GP
+data$NBA_3PPG[is.infinite(data$NBA_3PPG)] <- NA
+data$NBA_3PPG[is.nan(data$NBA_3PPG)] <- NA
+
+classify_3pm <- function(three_ppg) {
+  ifelse(is.na(three_ppg), "UNABLE",
+  ifelse(three_ppg >= quantile(three_ppg, 0.95, na.rm = TRUE), "ELITE",
+  ifelse(three_ppg >= quantile(three_ppg, 0.85, na.rm = TRUE), "GREAT",
+  ifelse(three_ppg >= quantile(three_ppg, 0.65, na.rm = TRUE), "GOOD",
+  ifelse(three_ppg >= quantile(three_ppg, 0.35, na.rm = TRUE), "AVERAGE",
+  ifelse(three_ppg >= quantile(three_ppg, 0.20, na.rm = TRUE), "POOR",
+  ifelse(three_ppg >= quantile(three_ppg, 0.10, na.rm = TRUE), "BAD", "UNABLE")))))))
+}
+
+# Apply the classification
+data$NBA_3PM_CLASS <- classify_3pm(data$NBA_3PPG)
+data$NBA_FG3_PCT_CLASS <- classify_3pm(data$NBA_FG3_PCT)
+```
+```{r}
+head(data)
+```
+```{r}
+library(dplyr)
+
+class_levels <- c("UNABLE", "BAD", "POOR", "AVERAGE", "GOOD", "GREAT", "ELITE")
+class_values <- setNames(1:7, class_levels)
+
+data <- data %>%
+  mutate(
+    VOL_VALUE = recode(NBA_3PM_CLASS, !!!class_values),
+    EFF_VALUE = recode(NBA_FG3_PCT_CLASS, !!!class_values),
+    CLASS_DIFF = abs(VOL_VALUE - EFF_VALUE),
+    
+    NBA_3SHOOTING_CLASS = case_when(
+      is.na(NBA_3PM_CLASS) & is.na(NBA_FG3_PCT_CLASS) ~ NA_character_,
+      is.na(NBA_3PM_CLASS) ~ NBA_FG3_PCT_CLASS,
+      is.na(NBA_FG3_PCT_CLASS) ~ NBA_3PM_CLASS,
+      CLASS_DIFF <= 1 ~ if_else(VOL_VALUE > EFF_VALUE, NBA_3PM_CLASS, NBA_FG3_PCT_CLASS),
+      TRUE ~ if_else(VOL_VALUE < EFF_VALUE, NBA_3PM_CLASS, NBA_FG3_PCT_CLASS)
+    )
+  ) %>%
+  select(-VOL_VALUE, -EFF_VALUE, -CLASS_DIFF)
+
+print("Combined shooting class distribution:")
+print(table(data$NBA_3SHOOTING_CLASS, useNA = "always"))
+```
+```{r}
+head(data)
+```
+
+
