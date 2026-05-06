@@ -31,6 +31,9 @@ library(nnet)
 library(glmnetcr)
 library(ordinalNet)
 library(pracma)
+library(pheatmap)
+library(rpart)
+library(rpart.plot)
 ```
 
 # Setup
@@ -126,15 +129,33 @@ model <- lm(NBA_FG3_PCT ~ PRE_3P_PCT + PRE_FT_PCT, data = clean_data)
 summary(model)
 
 color_factor <- as.factor(clean_data$PRE_COL_or_INT)
-colors <- rainbow(length(levels(color_factor)))[color_factor]
-s3d <- scatterplot3d(clean_data$PRE_3P_PCT, clean_data$PRE_FT_PCT, clean_data$NBA_FG3_PCT,
-                     color = colors, pch = 16,
-                     xlab = "Pre-3P%, >= 25 Attempts", ylab = "Pre-FT%, >= 25 Attempts", zlab = "NBA 3P%, >= 25 Attempts",
-                     main = "Colored by PRE_COL_OR_INT")
-s3d$plane3d(model, lty.box = "solid")
 
-legend("topright", legend = levels(color_factor), 
-       col = rainbow(length(levels(color_factor))), pch = 16)
+my_colors <- c(
+  "COL" = "#1f77b4",   # blue
+  "INT" = "#d62728"    # red
+)
+
+point_colors <- my_colors[color_factor]
+s3d <- scatterplot3d(
+  clean_data$PRE_3P_PCT,
+  clean_data$PRE_FT_PCT,
+  clean_data$NBA_FG3_PCT,
+  color = point_colors,
+  pch = 16,
+  xlab = "Pre-3P%, >= 25 Attempts",
+  ylab = "Pre-FT%, >= 25 Attempts",
+  zlab = "NBA 3P%, >= 25 Attempts",
+  main = "Pre-NBA 3P% and FT% vs. NBA 3P%, minimum 25 attempts"
+)
+
+s3d$plane3d(model, lty.box = "solid")
+legend(
+  "topright",
+  legend = levels(color_factor),
+  col = my_colors,
+  pch = 16
+)
+
 ```
 
 # Clustering
@@ -179,8 +200,46 @@ x <- na.omit(per_min_data$NBA_FG3A[indices])
 x_scaled <- scale(x)
 d <- dist(x_scaled)
 hc <- hclust(d, method = "ward.D2")
+
+# Plot dendrogram with cutoff lines and rectangles for k = 3 to 8
 plot(hc, labels = FALSE, hang = -1,
-     main = "Hierarchical Clustering Dendrogram (NBA_FG3A)")
+     main = "Hierarchical Clustering Dendrogram (NBA_FG3A)\nwith Cluster Cutoffs (k = 3 to 5)")
+
+# Get the height range of the dendrogram
+height_range <- max(hc$height)
+
+# Add horizontal cutoff lines and colored rectangles for each k
+colors <- c("red", "blue", "green3")
+
+for (i in 1:length(3:5)) {
+  k <- (3:5)[i]
+  
+  # Find the height at which cutting produces exactly k clusters
+  # This is the midpoint between merge heights for k and k-1 clusters
+  if(k < length(hc$height)) {
+    cutoff_height <- (hc$height[length(hc$height) - k + 1] + 
+                      hc$height[length(hc$height) - k + 2]) / 2
+  } else {
+    cutoff_height <- hc$height[1] + 0.1 * diff(range(hc$height))
+  }
+  
+  # Add horizontal cutoff line
+  abline(h = cutoff_height, col = colors[i], lty = 2, lwd = 1.5)
+  
+  # Add label for the cutoff
+  text(x = length(hc$order) * 0.98, y = cutoff_height, 
+       labels = paste0("k = ", k), 
+       col = colors[i], cex = 0.8, adj = c(1, -0.5))
+  
+  # Add colored rectangles for the clusters
+  rect.hclust(hc, k = k, border = colors[i])
+}
+
+# Add a legend
+legend("topright", legend = paste("k =", 3:5), 
+       col = colors, lty = 2, lwd = 1.5, cex = 0.8)
+
+# Compute silhouette widths
 sil_width <- numeric(20)
 
 for (k in 3:8) {
@@ -189,18 +248,25 @@ for (k in 3:8) {
   sil_width[k] <- mean(ss[, 3])
 }
 
-plot(3:8, sil_width[3:8], type = "b", pch = 19,
+# Plot silhouette results
+plot(3:8, sil_width[3:8], type = "b", pch = 19, cex = 1.5,
      xlab = "Number of clusters k",
      ylab = "Average silhouette width",
-     main = "Silhouette Method (NBA_FG3A)")
+     main = "Silhouette Method (NBA_FG3A)",
+     xaxt = "n")  # Suppress default x-axis to customize
+axis(1, at = 3:8)  # Add custom x-axis with integer ticks
 ```
 ```{r}
 best_k <- which.max(sil_width)
 clusters_best <- cutree(hc, k = best_k)
 
-plot(x, rep(0, length(x)), col = clusters_best, pch = 19,
-     xlab = "NBA_FG3A", ylab = "",
-     yaxt = "n", main = paste("Hierarchical Clustering on NBA_FG3A (k =", best_k, ")"))
+plot(
+  x,
+  jitter(rep(0, length(x)), amount = 0.05),
+  col = clusters_best, pch = 19, xlab = "NBA_FG3A", ylab = "",
+  yaxt = "n", main = paste("Hierarchical Clustering on NBA_FG3A (k =", best_k, ")")
+)
+
 ```
 
 ```{r}
@@ -245,11 +311,11 @@ plot(4:8, sil_width[4:8], type = "b", pch = 19,
 
 ```{r}
 best_k <- which.max(sil_width)
-clusters_best <- cutree(hc, k = 5)
+clusters_best <- cutree(hc, k = best_k)
 
 plot(x, rep(0, length(x)), col = clusters_best, pch = 19,
      xlab = "NBA_3P%", ylab = "",
-     yaxt = "n", main = paste("Hierarchical Clustering on NBA_FG3_PCT (k =", 5, ")"))
+     yaxt = "n", main = paste("Hierarchical Clustering on NBA_FG3_PCT (k =", best_k, ")"))
 ```
 ```{r}
 cluster_medians <- tapply(x, clusters_best, median)
@@ -318,7 +384,7 @@ ggplot(per_min_data, aes(x = NBA_FG3A, y = NBA_FG3_PCT, color = Cluster3Shooting
                "HighHigh" = "darkgreen")
   ) +
   labs(
-    title = "NBA 3PA Per Minute vs 3P%",
+    title = "NBA 3PA Per Minute vs 3P% Colored by Combined Class",
     x = "3PA Per Minute",
     y = "3P Percentage"
   ) +
@@ -334,7 +400,7 @@ ggplot(per_min_data, aes(x = NBA_FG3A, y = NBA_FG3_PCT)) +
   scale_size_manual(name = "3PA Class", values = c("1" = 1, "2" = 2, "3" = 3, "4" = 4,
       "5" = 5),
     labels = c("1 (Low)", "2", "3", "4", "5 (High)")) +
-  labs(title = "NBA 3PA Per Minute vs 3P%", x = "3PA Per Minute", y = "3P Percentage") +
+  labs(title = "NBA 3PA Per Minute vs NBA 3 Point Percentage", x = "3PA Per Minute", y = "3P Percentage") +
   theme_minimal()
 ```
 
@@ -403,110 +469,6 @@ model_results <- data.frame(
   stringsAsFactors = FALSE
 )
 ```
-
-
-## LASSO with CV for best lambda
-```{r}
-set.seed(67)
-#initialize data in matrices
-x_train <- as.matrix(train_data[, -ncol(train_data)]) 
-y_train <- train_data$response
-x_test  <- as.matrix(test_data[, -ncol(test_data)])
-y_test  <- test_data$response
-
-#run CV model
-cv_lasso <- cv.glmnet(x_train, y_train, 
-                      family = "multinomial",
-                      alpha = 1,
-                      nfolds = 10)
-plot(cv_lasso)
-
-# Check optimal values of lambda
-cat("Optimal lambda (min):", cv_lasso$lambda.min, "\n") 
-cat("Optimal lambda (1se):", cv_lasso$lambda.1se, "\n")
-coef(cv_lasso, s = "lambda.min")
-```
-
-```{r}
-# Calculate Test Accuracy
-preds_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "class")
-accuracy_min <- mean(as.character(preds_min) == as.character(y_test))
-cat("Test accuracy (lambda.min):", accuracy_min, "\n")
-
-# Calculate CM
-preds_min <- factor(preds_min, levels = levels(y_test))
-conf_mat_min <- confusionMatrix(preds_min, y_test, mode = "prec_recall")
-print(conf_mat_min)
-
-# Calculate Class Error
-class_error_min <- 1 - diag(conf_mat_min$table) / colSums(conf_mat_min$table)
-print(class_error_min)
-
-# AUC Vectors
-probs_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "response")
-probs_min <- probs_min[,,1]
-colnames(probs_min) <- levels(y_test)
-
-# Repeat
-preds_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "class")
-accuracy_1se <- mean(as.character(preds_1se) == as.character(y_test))
-cat("Test accuracy (lambda.1se):", accuracy_1se, "\n")
-
-preds_1se <- factor(preds_1se, levels = levels(y_test))
-conf_mat_1se <- confusionMatrix(preds_1se, y_test, mode = "prec_recall")
-print(conf_mat_1se)
-
-class_error_1se <- 1 - diag(conf_mat_1se$table) / colSums(conf_mat_1se$table)
-print(class_error_1se)
-
-probs_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "response")
-probs_1se <- probs_1se[,,1]
-colnames(probs_1se) <- levels(y_test)
-```
-
-```{r}
-# Load model results (done for every model)
-model_results <- rbind(model_results, data.frame(
-  Model = "LASSO Min Lambda",
-  Accuracy = accuracy_min,
-  Precision = mean(conf_mat_min$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_min$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_min$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc(y_test, probs_min)
-))
-
-model_results <- rbind(model_results, data.frame(
-  Model = "LASSO 1se Lambda",
-  Accuracy = accuracy_1se,
-  Precision = mean(conf_mat_1se$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_1se$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_1se$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc(y_test, probs_1se)
-))
-```
-
-```{r}
-# Create confusion matrix (done for every model)
-cm_table <- as.data.frame(conf_mat_min$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "darkorange") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (LASSO Min Lambda)",
-       x = "Actual Class", y = "Predicted Class")
-```
-```{r}
-cm_table <- as.data.frame(conf_mat_1se$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "skyblue") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (LASSO Lambda 1se)",
-       x = "Actual Class", y = "Predicted Class")
-```
-
 
 ## LDA 
 ```{r}
@@ -595,6 +557,53 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   labs(title = "Confusion Matrix Heatmap (LDA)",
        x = "Actual Class", y = "Predicted Class")
 ```
+```{r}
+# LDA Decision Boundary Visualization
+# Project data onto first two LDA dimensions
+lda_proj_train <- as.data.frame(predict(lda_fit, train_data)$x[, 1:2])
+lda_proj_train$class <- train_data$response
+colnames(lda_proj_train)[1:2] <- c("LD1", "LD2")
+
+# Create grid for decision regions
+ld1_range <- seq(min(lda_proj_train$LD1) - 1, max(lda_proj_train$LD1) + 1, length.out = 150)
+ld2_range <- seq(min(lda_proj_train$LD2) - 1, max(lda_proj_train$LD2) + 1, length.out = 150)
+grid <- expand.grid(LD1 = ld1_range, LD2 = ld2_range)
+
+# Get training means for each predictor
+train_means <- colMeans(train_data[, c("PRE_FG_PCT", "PRE_3PA", "PRE_FTA", "PRE_DRB", 
+                                        "PRE_BLK", "PRE_TOV", "PRE_PTS")])
+
+# Reconstruct original variables from LD scores
+grid_orig <- matrix(NA, nrow = nrow(grid), ncol = 7)
+colnames(grid_orig) <- names(train_means)
+
+for(i in 1:nrow(grid)) {
+  grid_orig[i, ] <- train_means + (grid$LD1[i] * lda_fit$scaling[, 1] + 
+                                     grid$LD2[i] * lda_fit$scaling[, 2])
+}
+
+grid_pred <- predict(lda_fit, as.data.frame(grid_orig))$class
+grid$class <- factor(grid_pred, levels = class_levels)
+
+# Plot
+ggplot() +
+  geom_tile(data = grid, aes(x = LD1, y = LD2, fill = class), alpha = 0.3) +
+  geom_point(data = lda_proj_train, aes(x = LD1, y = LD2, color = class), size = 2, alpha = 0.7) +
+  scale_fill_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00"),
+                    drop = FALSE) +
+  scale_color_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00"),
+                     drop = FALSE) +
+  labs(title = "LDA Decision Regions for Combined Class",
+       subtitle = paste0("Cross-validated Accuracy: ", round(max(lda_cv$results$Accuracy), 3)),
+       x = "Linear Discriminant 1",
+       y = "Linear Discriminant 2",
+       fill = "Class",
+       color = "Class") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(size = 11))
+```
 
 
 ## QDA
@@ -681,9 +690,60 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_text(aes(label = Freq), color = "black", size = 4) +
   scale_fill_gradient(low = "white", high = "skyblue") +
   theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (QDA)",
+  labs(title = "Confusion Matrix Heatmap (QDA) for Combined Class",
        x = "Actual Class", y = "Predicted Class")
 ```
+
+```{r}
+# QDA Decision Boundary Visualization
+# Project data using LDA dimensions for visualization purposes
+qda_proj_train <- as.data.frame(as.matrix(train_data[, c("PRE_FG_PCT", "PRE_3PA", "PRE_FTA", "PRE_DRB", 
+                                                          "PRE_BLK", "PRE_TOV", "PRE_PTS")]) %*% 
+                                  lda_fit$scaling[, 1:2])
+qda_proj_train$class <- train_data$response
+colnames(qda_proj_train)[1:2] <- c("LD1", "LD2")
+
+# Create grid for decision regions
+ld1_range <- seq(min(qda_proj_train$LD1) - 1, max(qda_proj_train$LD1) + 1, length.out = 150)
+ld2_range <- seq(min(qda_proj_train$LD2) - 1, max(qda_proj_train$LD2) + 1, length.out = 150)
+grid <- expand.grid(LD1 = ld1_range, LD2 = ld2_range)
+
+# Get training means for each predictor
+train_means <- colMeans(train_data[, c("PRE_FG_PCT", "PRE_3PA", "PRE_FTA", "PRE_DRB", 
+                                        "PRE_BLK", "PRE_TOV", "PRE_PTS")])
+
+# Reconstruct original variables from LD scores
+grid_orig <- matrix(NA, nrow = nrow(grid), ncol = 7)
+colnames(grid_orig) <- names(train_means)
+
+for(i in 1:nrow(grid)) {
+  grid_orig[i, ] <- train_means + (grid$LD1[i] * lda_fit$scaling[, 1] + 
+                                     grid$LD2[i] * lda_fit$scaling[, 2])
+}
+
+grid_pred <- predict(qda_fit, as.data.frame(grid_orig))$class
+grid$class <- factor(grid_pred, levels = class_levels)
+
+# Plot
+ggplot() +
+  geom_tile(data = grid, aes(x = LD1, y = LD2, fill = class), alpha = 0.3) +
+  geom_point(data = qda_proj_train, aes(x = LD1, y = LD2, color = class), size = 2, alpha = 0.7) +
+  scale_fill_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00"),
+                    drop = FALSE) +
+  scale_color_manual(values = c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00"),
+                     drop = FALSE) +
+  labs(title = "QDA Decision Regions for Combined Class",
+       subtitle = paste0("Cross-validated Accuracy: ", round(max(qda_cv$results$Accuracy), 3)),
+       x = "Discriminant 1",
+       y = "Discriminant 2",
+       fill = "Class",
+       color = "Class") +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(size = 11))
+```
+
 
 ## Comparison of LDA vs QDA
 ```{r}
@@ -701,6 +761,174 @@ legend("bottomright",
                   paste("QDA (AUC =", round(macro_auc_qda, 3), ")")),
        col = c("black", "red"), lwd = 2)
 ```
+
+## LASSO with CV for best lambda
+```{r}
+set.seed(67)
+#initialize data in matrices
+x_train <- as.matrix(train_data[, -ncol(train_data)]) 
+y_train <- train_data$response
+x_test  <- as.matrix(test_data[, -ncol(test_data)])
+y_test  <- test_data$response
+
+#run CV model
+cv_lasso <- cv.glmnet(x_train, y_train, 
+                      family = "multinomial",
+                      alpha = 1,
+                      nfolds = 10)
+plot(cv_lasso)
+
+# Check optimal values of lambda
+cat("Optimal lambda (min):", cv_lasso$lambda.min, "\n") 
+cat("Optimal lambda (1se):", cv_lasso$lambda.1se, "\n")
+
+log_lambda_min <- log(cv_lasso$lambda.min)
+log_lambda_1se <- log(cv_lasso$lambda.1se)
+
+# Get the y-axis limits to position the labels
+y_range <- range(cv_lasso$cvm + cv_lasso$cvsd, cv_lasso$cvm - cv_lasso$cvsd, na.rm = TRUE)
+
+# Add labels near the top of the plot
+text(x = log_lambda_min, 
+     y = y_range[2] * 0.95, 
+     labels = paste0("Min: ", round(cv_lasso$lambda.min, 4)),
+     pos = 2,
+     cex = 0.8,
+     col = "red")
+
+text(x = log_lambda_1se, 
+     y = y_range[2] * 0.88, 
+     labels = paste0("1SE: ", round(cv_lasso$lambda.1se, 4)),
+     pos = 2,
+     cex = 0.8,
+     col = "blue")
+```
+
+```{r}
+# Extract coefficients for lambda.min
+coefs <- coef(cv_lasso, s = "lambda.min")
+
+# Combine into a matrix (predictors x classes)
+# Remove intercept row and convert to matrix
+coef_matrix <- sapply(coefs, function(x) as.matrix(x)[-1, , drop = FALSE])
+colnames(coef_matrix) <- levels(as.factor(y_train))
+rownames(coef_matrix) <- rownames(coefs[[1]])[-1]  # predictor names without intercept
+
+# Keep only non-zero coefficients (or all if you prefer)
+non_zero_rows <- apply(coef_matrix, 1, function(x) any(x != 0))
+coef_nz <- coef_matrix[non_zero_rows, , drop = FALSE]
+
+# Plot heatmap
+pheatmap(coef_nz, 
+         cluster_rows = TRUE, 
+         cluster_cols = FALSE, 
+         main = paste0("Non-zero Coefficients at λ_min = ", round(cv_lasso$lambda.min, 4)),
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         fontsize_row = 8,
+         display_numbers = FALSE)
+```
+
+```{r}
+class_names <- levels(as.factor(y_train))
+par(mfrow = c(2, 3))  # 2x3 grid for 5 classes + 1 empty
+for (i in 1:5) {
+  coef_vec <- as.matrix(coefs[[i]])[-1, ]  # exclude intercept
+  non_zero <- coef_vec != 0
+  if (sum(non_zero) > 0) {
+    barplot(coef_vec[non_zero], 
+            names.arg = rownames(coefs[[1]])[-1][non_zero],
+            main = class_names[i],
+            las = 2, 
+            cex.names = 0.6,
+            col = ifelse(coef_vec[non_zero] > 0, "darkgreen", "darkred"))
+  }
+}
+par(mfrow = c(1, 1))  # reset
+```
+
+
+```{r}
+# Calculate Test Accuracy
+preds_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "class")
+accuracy_min <- mean(as.character(preds_min) == as.character(y_test))
+cat("Test accuracy (lambda.min):", accuracy_min, "\n")
+
+# Calculate CM
+preds_min <- factor(preds_min, levels = levels(y_test))
+conf_mat_min <- confusionMatrix(preds_min, y_test, mode = "prec_recall")
+print(conf_mat_min)
+
+# Calculate Class Error
+class_error_min <- 1 - diag(conf_mat_min$table) / colSums(conf_mat_min$table)
+print(class_error_min)
+
+# AUC Vectors
+probs_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "response")
+probs_min <- probs_min[,,1]
+colnames(probs_min) <- levels(y_test)
+
+# Repeat
+preds_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "class")
+accuracy_1se <- mean(as.character(preds_1se) == as.character(y_test))
+cat("Test accuracy (lambda.1se):", accuracy_1se, "\n")
+
+preds_1se <- factor(preds_1se, levels = levels(y_test))
+conf_mat_1se <- confusionMatrix(preds_1se, y_test, mode = "prec_recall")
+print(conf_mat_1se)
+
+class_error_1se <- 1 - diag(conf_mat_1se$table) / colSums(conf_mat_1se$table)
+print(class_error_1se)
+
+probs_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "response")
+probs_1se <- probs_1se[,,1]
+colnames(probs_1se) <- levels(y_test)
+```
+
+```{r}
+# Load model results (done for every model)
+model_results <- rbind(model_results, data.frame(
+  Model = "LASSO Min Lambda",
+  Accuracy = accuracy_min,
+  Precision = mean(conf_mat_min$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_min$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_min$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc(y_test, probs_min)
+))
+
+model_results <- rbind(model_results, data.frame(
+  Model = "LASSO 1se Lambda",
+  Accuracy = accuracy_1se,
+  Precision = mean(conf_mat_1se$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_1se$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_1se$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc(y_test, probs_1se)
+))
+```
+
+```{r}
+# Create confusion matrix (done for every model)
+cm_table <- as.data.frame(conf_mat_min$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "darkorange") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap (LASSO Min Lambda)",
+       x = "Actual Class", y = "Predicted Class")
+```
+```{r}
+cm_table <- as.data.frame(conf_mat_1se$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "skyblue") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap (LASSO Lambda 1se)",
+       x = "Actual Class", y = "Predicted Class")
+```
+
+
+
 ## PCA
 ```{r}
 # Set PCA statistics
@@ -774,6 +1002,98 @@ probs_pca <- as.matrix(probs_pca)
 colnames(probs_pca) <- colnames(probs_pca)
 probs_pca <- probs_pca[, levels(test_data_pca$response), drop = FALSE]
 ```
+```{r}
+# Use first 2 PCs from your pca_result (even if you used more in model)
+pca_scores_train <- data.frame(
+  PC1 = pca_result$x[train_index, 1],
+  PC2 = pca_result$x[train_index, 2],
+  response = df_scaled$response[train_index],
+  Dataset = "Train"
+)
+
+pca_scores_test <- data.frame(
+  PC1 = pca_result$x[-train_index, 1],
+  PC2 = pca_result$x[-train_index, 2],
+  response = df_scaled$response[-train_index],
+  Dataset = "Test"
+)
+
+pca_scores_all <- rbind(pca_scores_train, pca_scores_test)
+var_pc1 <- round(explained_var[1] * 100, 1)
+var_pc2 <- round(explained_var[2] * 100, 1)
+
+ggplot(pca_scores_all, aes(x = PC1, y = PC2, color = response, shape = Dataset)) +
+  geom_point(size = 2.5, alpha = 0.7) +
+  stat_ellipse(data = subset(pca_scores_all, Dataset == "Train"), 
+               aes(group = response), level = 0.95, alpha = 0.3) +
+  theme_minimal() +
+  labs(title = "PCA Score Plot - First Two Principal Components",
+       x = paste0("PC1 (", var_pc1, "%)"),
+       y = paste0("PC2 (", var_pc2, "%)")) +
+  scale_shape_manual(values = c("Train" = 16, "Test" = 17))
+```
+```{r}
+# Extract loadings for first 2 PCs
+loadings_df <- as.data.frame(pca_result$rotation[, 1:2])
+loadings_df$feature <- rownames(loadings_df)
+loadings_df$importance <- sqrt(loadings_df$PC1^2 + loadings_df$PC2^2)
+
+# Select top features to label (avoid overcrowding)
+loadings_top <- loadings_df[order(loadings_df$importance, decreasing = TRUE)[1:min(15, nrow(loadings_df))], ]
+
+ggplot(loadings_df, aes(x = PC1, y = PC2)) +
+  geom_segment(aes(xend = 0, yend = 0), alpha = 0.3, color = "gray60") +
+  geom_point(alpha = 0.3) +
+  geom_text(data = loadings_top, 
+            aes(label = feature, color = importance),
+            size = 3, fontface = "bold") +
+  scale_color_gradient(low = "darkblue", high = "darkred") +
+  theme_minimal() +
+  labs(title = "PCA Loadings - Feature Contributions to PC1 and PC2",
+       subtitle = paste0("Top ", nrow(loadings_top), " features labeled by importance"),
+       x = paste0("PC1 (", var_pc1, "%)"),
+       y = paste0("PC2 (", var_pc2, "%)"),
+       color = "Importance") +
+  geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5) +
+  geom_vline(xintercept = 0, linetype = "dashed", alpha = 0.5) +
+  theme(legend.position = "bottom")
+```
+```{r}
+# Extract coefficients from your multinom model
+coef_matrix <- coef(model_pca)
+
+# Get PC coefficient names (they should be named PC1, PC2, etc.)
+pc_cols <- grep("^PC", colnames(coef_matrix), value = TRUE)
+
+# Extract only PC coefficients
+pc_coefs <- coef_matrix[, pc_cols, drop = FALSE]
+
+# Calculate mean absolute coefficient across all classes
+pc_importance <- colMeans(abs(pc_coefs))
+
+# Create dataframe for plotting
+pc_importance_df <- data.frame(
+  PC = names(pc_importance),
+  Importance = pc_importance
+)
+
+# Extract PC numbers for proper ordering
+pc_importance_df$PC_num <- as.numeric(gsub("PC", "", pc_importance_df$PC))
+pc_importance_df <- pc_importance_df[order(pc_importance_df$PC_num), ]
+
+# Plot
+ggplot(pc_importance_df, aes(x = reorder(PC, PC_num), y = Importance)) +
+  geom_bar(stat = "identity", fill = "darkgreen", alpha = 0.8) +
+  geom_text(aes(label = round(Importance, 3)), vjust = -0.5, size = 3) +
+  theme_minimal() +
+  labs(title = "Average Importance of PCs in Multinomial Model",
+       subtitle = paste0("Based on mean absolute coefficients across all classes (", 
+                         num_pcs, " PCs used)"),
+       x = "Principal Component",
+       y = "Mean |Coefficient| Across Classes") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  expand_limits(y = max(pc_importance_df$Importance) * 1.15)
+```
 
 ```{r}
 cm_table <- as.data.frame(cm_pca$table)
@@ -845,24 +1165,94 @@ model_results <- rbind(model_results, data.frame(
   AUC = macro_auc(test_data$response, probs_svm_linear)
 ))
 ```
+
 ```{r}
-pc_importance <- abs(svm_linear$finalModel$W)
-pc_importance
-rotation <- svm_linear$preProcess$rotation   # PCA loadings
+# Get variable importance
+var_imp <- varImp(svm_linear, scale = FALSE)
 
-# PC importance from SVM
-pc_imp <- abs(svm_linear$finalModel$W)
+# Extract importance based on its structure
+imp_values <- var_imp$importance
 
-# Map back to original variables
-var_importance <- abs(rotation %*% pc_imp)
+# Extract feature names and scores properly
+if(is.matrix(imp_values) || is.data.frame(imp_values)) {
+  # If multiple columns (multiclass), take row means
+  if(ncol(imp_values) > 1) {
+    imp_scores <- rowMeans(abs(imp_values), na.rm = TRUE)
+  } else {
+    imp_scores <- imp_values[, 1]
+  }
+  feature_names <- rownames(imp_values)
+} else {
+  # If it's a vector
+  imp_scores <- as.numeric(imp_values)
+  feature_names <- names(imp_values)
+}
 
-# Convert to named vector
-var_importance <- as.vector(var_importance)
-names(var_importance) <- rownames(rotation)
+# Create dataframe
+imp_df <- data.frame(
+  Feature = feature_names,
+  Importance = imp_scores,
+  row.names = NULL
+)
 
-sort(var_importance, decreasing = TRUE)
+# Sort by importance
+imp_df <- imp_df[order(imp_df$Importance, decreasing = TRUE), ]
 
+# Check if features are PC names or original features
+if(grepl("^PC", imp_df$Feature[1])) {
+  cat("Features are PC names - back-projecting to original features...\n")
+  
+  # Extract PC importance
+  n_pcs <- nrow(imp_df)
+  pc_imp <- imp_df$Importance[1:n_pcs]
+  
+  # Get PCA rotation
+  pca_rot <- svm_linear$preProcess$rotation
+  
+  # Calculate original feature importance
+  if(ncol(pca_rot) >= n_pcs) {
+    pca_rot_used <- pca_rot[, 1:n_pcs, drop = FALSE]
+    feature_imp <- as.vector(abs(pca_rot_used) %*% matrix(pc_imp, ncol = 1))
+    feature_names <- rownames(pca_rot_used)
+    
+    imp_df <- data.frame(
+      Feature = feature_names,
+      Importance = feature_imp
+    )
+    imp_df <- imp_df[order(imp_df$Importance, decreasing = TRUE), ]
+  }
+}
+
+# Normalize to 0-100 scale for better interpretation
+imp_df$Importance_norm <- 100 * imp_df$Importance / max(imp_df$Importance)
+
+# Top 20 features
+top_n <- min(20, nrow(imp_df))
+imp_top20 <- imp_df[1:top_n, ]
+imp_top20$Feature <- factor(imp_top20$Feature, 
+                             levels = rev(imp_top20$Feature))
+
+# Plot
+ggplot(imp_top20, aes(x = Feature, y = Importance_norm)) +
+  geom_segment(aes(xend = Feature, yend = 0), 
+               color = "skyblue", linewidth = 1.5) +
+  geom_point(size = 3, color = "darkblue") +
+  geom_text(aes(label = round(Importance, 3)), hjust = -0.2, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "SVM Linear of Combined Class - Top 20 Most Important Features",
+       subtitle = paste0("Cost C = ", svm_linear$bestTune$cost,
+                        " | Test Accuracy = ", round(test_acc_linear, 4)),
+       x = "",
+       y = "Relative Importance (0-100 scale)") +
+  expand_limits(y = max(imp_top20$Importance_norm) * 1.15)
 ```
+
+
+
+
+
+
 
 ```{r}
 # Repeat
@@ -920,9 +1310,9 @@ cm_table <- as.data.frame(cm_svm_linear$table)
 ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_tile(color = "white") +
   geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "purple") +
+  scale_fill_gradient(low = "white", high = "#613fbaff") +
   theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap for Combined Class (SVM Linear) 52% accuracy",
+  labs(title = "Confusion Matrix Heatmap for Combined Class (SVM Linear)",
        x = "Actual Class", y = "Predicted Class")
 
 cm_table <- as.data.frame(cm_svm_radial$table)
@@ -996,7 +1386,7 @@ print(rf_model)
 print(cm_rf)
 
 # Print Variable Importance Plot
-varImpPlot(rf_model$finalModel)
+varImpPlot(rf_model$finalModel, n.var = 10, main = "Variable Importance for Best Random Forest Model")
 ```
 ```{r}
 cm_table <- as.data.frame(cm_rf$table)
@@ -1005,7 +1395,7 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_text(aes(label = Freq), color = "black", size = 4) +
   scale_fill_gradient(low = "white", high = "skyblue") +
   theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (Random Forest)",
+  labs(title = "Confusion Matrix Heatmap for Random Forest of Combined Class",
        x = "Actual Class", y = "Predicted Class")
 ```
 
@@ -1053,7 +1443,7 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_text(aes(label = Freq), color = "black", size = 4) +
   scale_fill_gradient(low = "white", high = "darkorange") +
   theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (Upsampling Random Forest)",
+  labs(title = "Confusion Matrix Heatmap Upsampling Random Forest for Combined Class",
        x = "Actual Class", y = "Predicted Class")
 ```
 
@@ -1089,7 +1479,7 @@ colnames(probs_rf_weighted) <- colnames(probs_rf_weighted)
 probs_rf_weighted <- probs_rf_weighted[, levels(test_data$response), drop = FALSE]
 
 model_results <- rbind(model_results, data.frame(
-  Model = "Weighted Random Forest",
+  Model = "Weighted Random Forest Non-CV",
   Accuracy = accuracy_rf_weighted,  
   Precision = mean(cm_rf_weighted$byClass[,"Precision"], na.rm = TRUE),
   Recall = mean(cm_rf_weighted$byClass[,"Recall"], na.rm = TRUE),
@@ -1104,8 +1494,68 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
   geom_text(aes(label = Freq), color = "black", size = 4) +
   scale_fill_gradient(low = "white", high = "forestgreen") +
   theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (Weighted Random Forest)",
+  labs(title = "Confusion Matrix Heatmap Weighted Random Forest For Combined Class",
        x = "Actual Class", y = "Predicted Class")
+```
+```{r}
+set.seed(12)
+
+# Set class weights
+class_counts <- table(train_data$response)
+class_weights <- 1 / class_counts
+class_weights <- class_weights / sum(class_weights)
+
+# Calculate observation-level weights
+obs_weights <- class_weights[as.character(train_data$response)]
+
+# 10-fold CV with caret - Fixed version
+rf_weighted_cv <- train(
+  response ~ ., 
+  data = train_data,
+  method = "rf",
+  trControl = trainControl(
+    method = "cv",
+    number = 10,
+    classProbs = TRUE,
+    summaryFunction = multiClassSummary,
+    verboseIter = FALSE
+  ),
+  ntree = 500,
+  # Use tuneGrid instead of mtry parameter
+  tuneGrid = data.frame(mtry = 7),  # Fixed mtry value
+  importance = TRUE,
+  weights = obs_weights
+)
+
+# CV results
+cat("\n===== 10-Fold Cross-Validation Results =====\n")
+print(rf_weighted_cv)
+cat("Cross-validated Accuracy:", max(rf_weighted_cv$results$Accuracy), "\n")
+
+# Test set predictions
+preds_rf_weighted <- predict(rf_weighted_cv, newdata = test_data)
+
+cm_rf_weighted <- confusionMatrix(preds_rf_weighted, test_data$response, mode = "prec_recall")
+accuracy_rf_weighted <- mean(as.character(preds_rf_weighted) == as.character(test_data$response))
+
+cat("\n===== Test Set Results =====\n")
+cat("Test Accuracy:", accuracy_rf_weighted, "\n")
+print(cm_rf_weighted)
+
+probs_rf_weighted <- predict(rf_weighted_cv, newdata = test_data, type = "prob")
+probs_rf_weighted <- as.matrix(probs_rf_weighted)
+
+colnames(probs_rf_weighted) <- colnames(probs_rf_weighted)
+probs_rf_weighted <- probs_rf_weighted[, levels(test_data$response), drop = FALSE]
+
+model_results <- rbind(model_results, data.frame(
+  Model = "Weighted Random Forest CV",
+  Accuracy = accuracy_rf_weighted,  
+  Precision = mean(cm_rf_weighted$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(cm_rf_weighted$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(cm_rf_weighted$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc(test_data$response, probs_rf_weighted)
+))
 ```
 
 ```{r}
@@ -1115,9 +1565,6 @@ varImpPlot(rf_weighted, main="RF Weighted Variable Importance")
 ```{r}
 # Original best model, so we print a pretty tree
 single_tree <- randomForest::getTree(rf_weighted, k = 1, labelVar = TRUE)
-
-library(rpart)
-library(rpart.plot)
 
 to_rpart <- function(tree, data) {
   response <- all.vars(formula(rf_weighted))[1]
@@ -1185,7 +1632,7 @@ trainControl(method = "cv", number = 10, summaryFunction = multiClassSummary)
 
 tune_grid <- expand.grid(
   nrounds = 100,
-  max_depth = 3,
+  max_depth = 5,
   eta = 0.01,
   gamma = 0,
   colsample_bytree = 0.8,
@@ -1245,7 +1692,7 @@ model_results_combined <- model_results
 
 
 
-# class 3PCT
+# Class 3PA
 
 ## Initialize Train / Test Split
 ```{r}
@@ -1254,7 +1701,7 @@ X <- per_min_data[, c(8,13,38:40,42,43,45,46,48:50, 52:55, 56:66)]
 X[is.na(X)] <- 0
 y <- per_min_data[, 68]
 
-y <- factor(y, levels = 1:5, labels = c("Bad", "BelowAvg", "Average", "AboveAvg", "Great"))
+y <- factor(y, levels = 1:5, labels = c("NoVol", "BelowAvgVol", "AverageVol", "AboveAvgVol", "HighVol"))
 
 df <- data.frame(X, response = y)
 df_scaled <- data.frame(scale(df[, -ncol(df)]), response = df$response)
@@ -1264,7 +1711,7 @@ set.seed(67)
 train_index <- createDataPartition(df_scaled$response, p = 0.8, list = FALSE)
 train_data <- df_scaled[train_index, ]
 test_data  <- df_scaled[-train_index, ]
-class_levels <- c("Bad", "BelowAvg", "Average", "AboveAvg", "Great")
+class_levels <- c("NoVol", "BelowAvgVol", "AverageVol", "AboveAvgVol", "HighVol")
 ```
 
 
@@ -1312,6 +1759,198 @@ model_results <- data.frame(
 )
 ```
 
+## LDA 
+```{r}
+set.seed(22222)
+# Run cross validation
+train_control <- trainControl(method = "cv", number = 10,
+                              summaryFunction = multiClassSummary)
+
+lda_cv <- train(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
+                           PRE_BLK + PRE_TOV + PRE_PTS, data = train_data,
+                method = "lda",
+                trControl = train_control)
+
+print(lda_cv)
+cat("Cross-validated Accuracy (training set):", max(lda_cv$results$Accuracy), "\n")
+
+# Set fit model
+lda_fit <- lda(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
+                           PRE_BLK + PRE_TOV + PRE_PTS,
+               data = train_data)
+
+pred_obj <- predict(lda_fit, test_data)
+
+all_pred   <- factor(pred_obj$class, levels = class_levels)
+all_actual <- factor(test_data$response, levels = class_levels)
+all_probs  <- pred_obj$posterior
+
+# Find CM
+conf_mat_lda <- confusionMatrix(all_pred, all_actual, mode = "prec_recall")
+print(conf_mat_lda)
+
+# Calculate Accuracy and AUC
+LDA_acc <- mean(as.character(all_pred) == as.character(all_actual))
+cat("Test Accuracy (LDA):", LDA_acc, "\n")
+
+overall_multiclass <- multiclass.roc(all_actual, all_probs)
+cat("Overall multiclass AUC (test set):", overall_multiclass$auc, "\n")
+
+# Graph AUC / Calculate Macro AUC
+fpr_grid <- seq(0, 1, length.out = 200)
+tpr_matrix <- matrix(NA, nrow = length(fpr_grid), ncol = length(class_levels))
+
+for (i in seq_along(class_levels)) {
+  class <- class_levels[i]
+  binary_actual <- factor(ifelse(all_actual == class, class, "Other"),
+                          levels = c("Other", class))
+  class_probs <- all_probs[, class]
+  
+  roc_obj <- roc(response = binary_actual,
+                 predictor = class_probs,
+                 levels = c("Other", class),
+                 positive = class,
+                 quiet = TRUE)
+  
+  cat("AUC of", class, ":", auc(roc_obj), "\n")
+  
+  fpr <- 1 - roc_obj$specificities
+  tpr <- roc_obj$sensitivities
+  
+  interp_tpr <- approx(fpr, tpr, xout = fpr_grid, ties = mean, rule = 2)$y
+  tpr_matrix[, i] <- interp_tpr
+}
+macro_tpr_lda <- rowMeans(tpr_matrix, na.rm = TRUE)
+macro_auc_lda <- trapz(fpr_grid, macro_tpr_lda)
+cat("Macro AUC (LDA test set):", macro_auc_lda, "\n")
+```
+
+```{r}
+model_results <- rbind(model_results, data.frame(
+  Model = "LDA",
+  Accuracy = LDA_acc,
+  Precision = mean(conf_mat_lda$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_lda$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_lda$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc_lda
+))
+```
+
+```{r}
+cm_table <- as.data.frame(conf_mat_lda$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "#d62728") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap of 3PA Classes (LDA) 56% Accuracy",
+       x = "Actual Class", y = "Predicted Class")
+```
+
+
+## QDA
+```{r}
+# Same steps as LDA
+set.seed(22222)
+train_control <- trainControl(method = "cv", number = 10,
+                              summaryFunction = multiClassSummary)
+
+qda_cv <- train(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
+                           PRE_BLK + PRE_TOV + PRE_PTS,
+                data = train_data,
+                method = "qda",
+                trControl = train_control)
+
+print(qda_cv)
+cat("Cross-validated Accuracy (training set):", max(qda_cv$results$Accuracy), "\n")
+
+qda_fit <- qda(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
+                           PRE_BLK + PRE_TOV + PRE_PTS,
+               data = train_data)
+
+
+pred_obj <- predict(qda_fit, test_data)
+
+all_pred   <- factor(pred_obj$class, levels = class_levels)
+all_actual <- factor(test_data$response, levels = class_levels)
+all_probs  <- pred_obj$posterior
+
+conf_mat_qda <- confusionMatrix(all_pred, all_actual, mode = "prec_recall")
+print(conf_mat_qda)
+
+QDA_acc <- mean(as.character(all_pred) == as.character(all_actual))
+cat("Test Accuracy (QDA):", QDA_acc, "\n")
+
+overall_multiclass <- multiclass.roc(all_actual, all_probs)
+cat("Overall multiclass AUC (QDA test set):", overall_multiclass$auc, "\n")
+
+fpr_grid <- seq(0, 1, length.out = 200)
+tpr_matrix <- matrix(NA, nrow = length(fpr_grid), ncol = length(class_levels))
+
+for (i in seq_along(class_levels)) {
+  class <- class_levels[i]
+  binary_actual <- factor(ifelse(all_actual == class, class, "Other"),
+                          levels = c("Other", class))
+  class_probs <- all_probs[, class]
+  
+  roc_obj <- roc(response = binary_actual,
+                 predictor = class_probs,
+                 levels = c("Other", class),
+                 positive = class,
+                 quiet = TRUE)
+  
+  cat("AUC of", class, ":", auc(roc_obj), "\n")
+  
+  fpr <- 1 - roc_obj$specificities
+  tpr <- roc_obj$sensitivities
+  
+  interp_tpr <- approx(fpr, tpr, xout = fpr_grid, ties = mean, rule = 2)$y
+  tpr_matrix[, i] <- interp_tpr
+}
+
+macro_tpr_qda <- rowMeans(tpr_matrix, na.rm = TRUE)
+macro_auc_qda <- trapz(fpr_grid, macro_tpr_qda)
+cat("Macro AUC (QDA test set):", macro_auc_qda, "\n")
+```
+
+```{r}
+model_results <- rbind(model_results, data.frame(
+  Model = "QDA",
+  Accuracy = QDA_acc,
+  Precision = mean(conf_mat_qda$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_qda$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_qda$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc_qda
+))
+```
+
+```{r}
+cm_table <- as.data.frame(conf_mat_qda$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "skyblue") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap (QDA)",
+       x = "Actual Class", y = "Predicted Class")
+```
+
+## Comparison of LDA vs QDA
+```{r}
+LDA_acc - QDA_acc
+```
+```{r}
+# Graph AUC curves
+plot(fpr_grid, macro_tpr_lda, type = "l", lwd = 2, col = "black",
+     xlab = "1 - Specificity (FPR)", ylab = "Sensitivity (TPR)",
+     main = paste("Macro-average ROC Curves of LDA and QDA"))
+abline(a = 0, b = 1, lty = 2, col = "gray")
+lines(fpr_grid, macro_tpr_qda, lwd = 2, col = "red")
+legend("bottomright",
+       legend = c(paste("LDA (AUC =", round(macro_auc_lda, 3), ")"),
+                  paste("QDA (AUC =", round(macro_auc_qda, 3), ")")),
+       col = c("black", "red"), lwd = 2)
+```
 
 ## LASSO with CV for best lambda
 ```{r}
@@ -1416,198 +2055,7 @@ ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
 ```
 
 
-## LDA 
-```{r}
-set.seed(22222)
-# Run cross validation
-train_control <- trainControl(method = "cv", number = 10,
-                              summaryFunction = multiClassSummary)
 
-lda_cv <- train(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
-                           PRE_BLK + PRE_TOV + PRE_PTS, data = train_data,
-                method = "lda",
-                trControl = train_control)
-
-print(lda_cv)
-cat("Cross-validated Accuracy (training set):", max(lda_cv$results$Accuracy), "\n")
-
-# Set fit model
-lda_fit <- lda(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
-                           PRE_BLK + PRE_TOV + PRE_PTS,
-               data = train_data)
-
-pred_obj <- predict(lda_fit, test_data)
-
-all_pred   <- factor(pred_obj$class, levels = class_levels)
-all_actual <- factor(test_data$response, levels = class_levels)
-all_probs  <- pred_obj$posterior
-
-# Find CM
-conf_mat_lda <- confusionMatrix(all_pred, all_actual, mode = "prec_recall")
-print(conf_mat_lda)
-
-# Calculate Accuracy and AUC
-LDA_acc <- mean(as.character(all_pred) == as.character(all_actual))
-cat("Test Accuracy (LDA):", LDA_acc, "\n")
-
-overall_multiclass <- multiclass.roc(all_actual, all_probs)
-cat("Overall multiclass AUC (test set):", overall_multiclass$auc, "\n")
-
-# Graph AUC / Calculate Macro AUC
-fpr_grid <- seq(0, 1, length.out = 200)
-tpr_matrix <- matrix(NA, nrow = length(fpr_grid), ncol = length(class_levels))
-
-for (i in seq_along(class_levels)) {
-  class <- class_levels[i]
-  binary_actual <- factor(ifelse(all_actual == class, class, "Other"),
-                          levels = c("Other", class))
-  class_probs <- all_probs[, class]
-  
-  roc_obj <- roc(response = binary_actual,
-                 predictor = class_probs,
-                 levels = c("Other", class),
-                 positive = class,
-                 quiet = TRUE)
-  
-  cat("AUC of", class, ":", auc(roc_obj), "\n")
-  
-  fpr <- 1 - roc_obj$specificities
-  tpr <- roc_obj$sensitivities
-  
-  interp_tpr <- approx(fpr, tpr, xout = fpr_grid, ties = mean, rule = 2)$y
-  tpr_matrix[, i] <- interp_tpr
-}
-macro_tpr_lda <- rowMeans(tpr_matrix, na.rm = TRUE)
-macro_auc_lda <- trapz(fpr_grid, macro_tpr_lda)
-cat("Macro AUC (LDA test set):", macro_auc_lda, "\n")
-```
-
-```{r}
-model_results <- rbind(model_results, data.frame(
-  Model = "LDA",
-  Accuracy = LDA_acc,
-  Precision = mean(conf_mat_lda$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_lda$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_lda$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc_lda
-))
-```
-
-```{r}
-cm_table <- as.data.frame(conf_mat_lda$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "red") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap of 3P% Classes (LDA) 56% Accuracy",
-       x = "Actual Class", y = "Predicted Class")
-```
-
-
-## QDA
-```{r}
-# Same steps as LDA
-set.seed(22222)
-train_control <- trainControl(method = "cv", number = 10,
-                              summaryFunction = multiClassSummary)
-
-qda_cv <- train(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
-                           PRE_BLK + PRE_TOV + PRE_PTS,
-                data = train_data,
-                method = "qda",
-                trControl = train_control)
-
-print(qda_cv)
-cat("Cross-validated Accuracy (training set):", max(qda_cv$results$Accuracy), "\n")
-
-qda_fit <- qda(response ~ PRE_FG_PCT + PRE_3PA + PRE_FTA + PRE_DRB + 
-                           PRE_BLK + PRE_TOV + PRE_PTS,
-               data = train_data)
-
-
-pred_obj <- predict(qda_fit, test_data)
-
-all_pred   <- factor(pred_obj$class, levels = class_levels)
-all_actual <- factor(test_data$response, levels = class_levels)
-all_probs  <- pred_obj$posterior
-
-conf_mat_qda <- confusionMatrix(all_pred, all_actual, mode = "prec_recall")
-print(conf_mat_qda)
-
-QDA_acc <- mean(as.character(all_pred) == as.character(all_actual))
-cat("Test Accuracy (QDA):", QDA_acc, "\n")
-
-overall_multiclass <- multiclass.roc(all_actual, all_probs)
-cat("Overall multiclass AUC (QDA test set):", overall_multiclass$auc, "\n")
-
-fpr_grid <- seq(0, 1, length.out = 200)
-tpr_matrix <- matrix(NA, nrow = length(fpr_grid), ncol = length(class_levels))
-
-for (i in seq_along(class_levels)) {
-  class <- class_levels[i]
-  binary_actual <- factor(ifelse(all_actual == class, class, "Other"),
-                          levels = c("Other", class))
-  class_probs <- all_probs[, class]
-  
-  roc_obj <- roc(response = binary_actual,
-                 predictor = class_probs,
-                 levels = c("Other", class),
-                 positive = class,
-                 quiet = TRUE)
-  
-  cat("AUC of", class, ":", auc(roc_obj), "\n")
-  
-  fpr <- 1 - roc_obj$specificities
-  tpr <- roc_obj$sensitivities
-  
-  interp_tpr <- approx(fpr, tpr, xout = fpr_grid, ties = mean, rule = 2)$y
-  tpr_matrix[, i] <- interp_tpr
-}
-
-macro_tpr_qda <- rowMeans(tpr_matrix, na.rm = TRUE)
-macro_auc_qda <- trapz(fpr_grid, macro_tpr_qda)
-cat("Macro AUC (QDA test set):", macro_auc_qda, "\n")
-```
-
-```{r}
-model_results <- rbind(model_results, data.frame(
-  Model = "QDA",
-  Accuracy = QDA_acc,
-  Precision = mean(conf_mat_qda$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_qda$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_qda$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc_qda
-))
-```
-
-```{r}
-cm_table <- as.data.frame(conf_mat_qda$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "skyblue") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (QDA)",
-       x = "Actual Class", y = "Predicted Class")
-```
-
-## Comparison of LDA vs QDA
-```{r}
-LDA_acc - QDA_acc
-```
-```{r}
-# Graph AUC curves
-plot(fpr_grid, macro_tpr_lda, type = "l", lwd = 2, col = "black",
-     xlab = "1 - Specificity (FPR)", ylab = "Sensitivity (TPR)",
-     main = paste("Macro-average ROC Curves of LDA and QDA"))
-abline(a = 0, b = 1, lty = 2, col = "gray")
-lines(fpr_grid, macro_tpr_qda, lwd = 2, col = "red")
-legend("bottomright",
-       legend = c(paste("LDA (AUC =", round(macro_auc_lda, 3), ")"),
-                  paste("QDA (AUC =", round(macro_auc_qda, 3), ")")),
-       col = c("black", "red"), lwd = 2)
-```
 ## PCA
 ```{r}
 # Set PCA statistics
@@ -1753,6 +2201,78 @@ model_results <- rbind(model_results, data.frame(
   AUC = macro_auc(test_data$response, probs_svm_linear)
 ))
 ```
+
+
+```{r}
+# Create PCA for 2D visualization using ALL data (not just PCs used in model)
+# This ensures we can project back and forth
+pca_viz <- prcomp(df_scaled[, -ncol(df_scaled)], center = TRUE, scale. = TRUE)
+
+# Project training data to first 2 PCs
+train_pca_2d <- data.frame(
+  PC1 = pca_viz$x[train_index, 1],
+  PC2 = pca_viz$x[train_index, 2],
+  response = df_scaled$response[train_index]
+)
+
+# Create grid in PC space
+x_range <- range(train_pca_2d$PC1) + c(-0.5, 0.5) * diff(range(train_pca_2d$PC1))
+y_range <- range(train_pca_2d$PC2) + c(-0.5, 0.5) * diff(range(train_pca_2d$PC2))
+grid <- expand.grid(
+  PC1 = seq(x_range[1], x_range[2], length.out = 100),
+  PC2 = seq(y_range[1], y_range[2], length.out = 100)
+)
+
+# Project grid points back to original feature space
+# Inverse PCA: grid_orig = grid * rotation^T + center
+grid_matrix <- as.matrix(grid)
+rotation_2d <- pca_viz$rotation[, 1:2]
+grid_orig <- grid_matrix %*% t(rotation_2d)
+
+# Add back the scaling and centering
+if (!is.null(pca_viz$center)) {
+  grid_orig <- sweep(grid_orig, 2, pca_viz$center, "+")
+}
+
+# Convert to data frame with original column names
+grid_orig_df <- as.data.frame(grid_orig)
+colnames(grid_orig_df) <- names(pca_viz$center)
+
+# Now predict using the SVM model (which expects original feature space)
+# The svm_linear model from caret can predict on new data directly
+grid_preds <- predict(svm_linear, newdata = grid_orig_df)
+
+# Add predictions to grid
+grid$Class <- grid_preds
+
+# Calculate variance explained
+var_pc1 <- round(summary(pca_viz)$importance[2, 1] * 100, 1)
+var_pc2 <- round(summary(pca_viz)$importance[2, 2] * 100, 1)
+
+# Create the decision boundary plot
+ggplot() +
+  # Decision regions
+  geom_tile(data = grid, aes(x = PC1, y = PC2, fill = Class), alpha = 0.3) +
+  # Training data points
+  geom_point(data = train_pca_2d, aes(x = PC1, y = PC2, color = response), 
+             size = 2, alpha = 0.7) +
+  # Confidence ellipses for training data
+  stat_ellipse(data = train_pca_2d, aes(x = PC1, y = PC2, color = response), 
+               level = 0.95, alpha = 0.5, linewidth = 0.8) +
+  theme_minimal() +
+  labs(title = "SVM Linear - Decision Boundaries (First 2 PCs)",
+       subtitle = paste0("Cost C = ", svm_linear$bestTune$cost, 
+                         " | CV Accuracy = ", round(max(svm_linear$results$Accuracy), 4),
+                         " | Test Accuracy = ", round(test_acc_linear, 4)),
+       x = paste0("PC1 (", var_pc1, "%)"),
+       y = paste0("PC2 (", var_pc2, "%)"),
+       color = "Actual Class",
+       fill = "Predicted Region") +
+  guides(color = guide_legend(order = 1), fill = guide_legend(order = 2))
+```
+
+
+
 ```{r}
 # Repeat
 svm_radial <- train(
@@ -1861,8 +2381,8 @@ rf_model <- train(response ~ ., data = train_data,
                   method = "rf",
                   trControl = trainControl(method = "cv", number = 10,
                                            summaryFunction = multiClassSummary),
-                  tuneGrid = data.frame(mtry = results[["ntree_500"]]$bestTune$mtry),
-                  ntree = 500)
+                  tuneGrid = data.frame(mtry = results[["ntree_250"]]$bestTune$mtry),
+                  ntree = 250)
 preds_rf <- predict(rf_model, newdata = test_data)
 cm_rf <- confusionMatrix(preds_rf, test_data$response, mode = "prec_recall")
 
@@ -1887,6 +2407,28 @@ print(cm_rf)
 # Print Variable Importance Plot
 varImpPlot(rf_model$finalModel)
 ```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+# Train a single decision tree for visualization (not the random forest)
+tree_model <- rpart(response ~ ., data = train_data, 
+                    method = "class",
+                    control = rpart.control(cp = 0.01, maxdepth = 3))
+
+# Beautiful tree plot
+rpart.plot(tree_model,
+           type = 2,           # Label all nodes
+           extra = 101,        # Show predicted class and probabilities
+           fallen.leaves = TRUE,
+           main = "Decision Tree (for visualization, not the RF model)",
+           box.palette = "RdYlGn",
+           shadow.col = "gray",
+           nn = TRUE)          # Show node numbers
+```
+
+
 ```{r}
 cm_table <- as.data.frame(cm_rf$table)
 ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
@@ -2147,7 +2689,7 @@ X <- per_min_data[, c(8,13,38:40,42,43,45,46,48:50, 52:55, 56:66)]
 X[is.na(X)] <- 0
 y <- per_min_data[, 69]
 
-y <- factor(y, levels = 1:5, labels = c("ZeroAvgPCT","BelowAvgPCT","AveragePCT", "AboveAvgPCT", "HighPCT"))
+y <- factor(y, levels = 1:6, labels = c("ZeroAvgPCT","LowAvgPCT","BelowAvgPCT", "AveragePCT", "AboveAvgPCT", "HighPCT"))
 
 df <- data.frame(X, response = y)
 df_scaled <- data.frame(scale(df[, -ncol(df)]), response = df$response)
@@ -2157,7 +2699,7 @@ set.seed(67)
 train_index <- createDataPartition(df_scaled$response, p = 0.8, list = FALSE)
 train_data <- df_scaled[train_index, ]
 test_data  <- df_scaled[-train_index, ]
-class_levels <- c("ZeroAvgPCT","BelowAvgPCT","AveragePCT", "AboveAvgPCT", "HighPCT")
+class_levels <- c("ZeroAvg%","LowAvg%","BelowAvg%", "Average%", "AboveAvg%", "High%")
 ```
 
 
@@ -2172,7 +2714,7 @@ full_model <- orm(response ~ ., data = train_data)
 vif(step_model)
 ```
 ```{r}
-predictors <- df_scaled[, c("PRE_G", "PRE_3PA", "PRE_3P_PCT", "PRE_FTA", "PRE_FT_PCT")]
+predictors <- df_scaled[, c("PRE_3PA", "PRE_3P_PCT", "PRE_BLK")]
 cor_matrix <- cor(predictors)
 print(round(cor_matrix, 3))
 ```
@@ -2190,110 +2732,6 @@ model_results <- data.frame(
   stringsAsFactors = FALSE
 )
 ```
-
-
-## LASSO with CV for best lambda
-```{r}
-set.seed(67)
-#initialize data in matrices
-x_train <- as.matrix(train_data[, -ncol(train_data)]) 
-y_train <- train_data$response
-x_test  <- as.matrix(test_data[, -ncol(test_data)])
-y_test  <- test_data$response
-
-#run CV model
-cv_lasso <- cv.glmnet(x_train, y_train, 
-                      family = "multinomial",
-                      alpha = 1,
-                      nfolds = 10)
-plot(cv_lasso)
-
-# Check optimal values of lambda
-cat("Optimal lambda (min):", cv_lasso$lambda.min, "\n") 
-cat("Optimal lambda (1se):", cv_lasso$lambda.1se, "\n")
-coef(cv_lasso, s = "lambda.min")
-```
-
-```{r}
-# Calculate Test Accuracy
-preds_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "class")
-accuracy_min <- mean(as.character(preds_min) == as.character(y_test))
-cat("Test accuracy (lambda.min):", accuracy_min, "\n")
-
-# Calculate CM
-preds_min <- factor(preds_min, levels = levels(y_test))
-conf_mat_min <- confusionMatrix(preds_min, y_test, mode = "prec_recall")
-print(conf_mat_min)
-
-# Calculate Class Error
-class_error_min <- 1 - diag(conf_mat_min$table) / colSums(conf_mat_min$table)
-print(class_error_min)
-
-# AUC Vectors
-probs_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "response")
-probs_min <- probs_min[,,1]
-colnames(probs_min) <- levels(y_test)
-
-# Repeat
-preds_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "class")
-accuracy_1se <- mean(as.character(preds_1se) == as.character(y_test))
-cat("Test accuracy (lambda.1se):", accuracy_1se, "\n")
-
-preds_1se <- factor(preds_1se, levels = levels(y_test))
-conf_mat_1se <- confusionMatrix(preds_1se, y_test, mode = "prec_recall")
-print(conf_mat_1se)
-
-class_error_1se <- 1 - diag(conf_mat_1se$table) / colSums(conf_mat_1se$table)
-print(class_error_1se)
-
-probs_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "response")
-probs_1se <- probs_1se[,,1]
-colnames(probs_1se) <- levels(y_test)
-```
-
-```{r}
-# Load model results (done for every model)
-model_results <- rbind(model_results, data.frame(
-  Model = "LASSO Min Lambda",
-  Accuracy = accuracy_min,
-  Precision = mean(conf_mat_min$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_min$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_min$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc(y_test, probs_min)
-))
-
-model_results <- rbind(model_results, data.frame(
-  Model = "LASSO 1se Lambda",
-  Accuracy = accuracy_1se,
-  Precision = mean(conf_mat_1se$byClass[,"Precision"], na.rm = TRUE),
-  Recall = mean(conf_mat_1se$byClass[,"Recall"], na.rm = TRUE),
-  F1 = mean(conf_mat_1se$byClass[,"F1"], na.rm = TRUE),
-  AUC = macro_auc(y_test, probs_1se)
-))
-```
-
-```{r}
-# Create confusion matrix (done for every model)
-cm_table <- as.data.frame(conf_mat_min$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "darkorange") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap (LASSO Min Lambda)",
-       x = "Actual Class", y = "Predicted Class")
-```
-```{r}
-cm_table <- as.data.frame(conf_mat_1se$table)
-ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = Freq), color = "black", size = 4) +
-  scale_fill_gradient(low = "white", high = "#1f77b4") +
-  theme_minimal() +
-  labs(title = "Confusion Matrix Heatmap for 3P% (LASSO Lambda 1se) 55% Accuracy",
-       x = "Actual Class", y = "Predicted Class")
-```
-
 
 ## LDA 
 ```{r}
@@ -2488,6 +2926,111 @@ legend("bottomright",
                   paste("QDA (AUC =", round(macro_auc_qda, 3), ")")),
        col = c("black", "red"), lwd = 2)
 ```
+
+## LASSO with CV for best lambda
+```{r}
+set.seed(67)
+#initialize data in matrices
+x_train <- as.matrix(train_data[, -ncol(train_data)]) 
+y_train <- train_data$response
+x_test  <- as.matrix(test_data[, -ncol(test_data)])
+y_test  <- test_data$response
+
+#run CV model
+cv_lasso <- cv.glmnet(x_train, y_train, 
+                      family = "multinomial",
+                      alpha = 1,
+                      nfolds = 10)
+plot(cv_lasso)
+
+# Check optimal values of lambda
+cat("Optimal lambda (min):", cv_lasso$lambda.min, "\n") 
+cat("Optimal lambda (1se):", cv_lasso$lambda.1se, "\n")
+coef(cv_lasso, s = "lambda.min")
+```
+
+```{r}
+# Calculate Test Accuracy
+preds_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "class")
+accuracy_min <- mean(as.character(preds_min) == as.character(y_test))
+cat("Test accuracy (lambda.min):", accuracy_min, "\n")
+
+# Calculate CM
+preds_min <- factor(preds_min, levels = levels(y_test))
+conf_mat_min <- confusionMatrix(preds_min, y_test, mode = "prec_recall")
+print(conf_mat_min)
+
+# Calculate Class Error
+class_error_min <- 1 - diag(conf_mat_min$table) / colSums(conf_mat_min$table)
+print(class_error_min)
+
+# AUC Vectors
+probs_min <- predict(cv_lasso, newx = x_test, s = "lambda.min", type = "response")
+probs_min <- probs_min[,,1]
+colnames(probs_min) <- levels(y_test)
+
+# Repeat
+preds_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "class")
+accuracy_1se <- mean(as.character(preds_1se) == as.character(y_test))
+cat("Test accuracy (lambda.1se):", accuracy_1se, "\n")
+
+preds_1se <- factor(preds_1se, levels = levels(y_test))
+conf_mat_1se <- confusionMatrix(preds_1se, y_test, mode = "prec_recall")
+print(conf_mat_1se)
+
+class_error_1se <- 1 - diag(conf_mat_1se$table) / colSums(conf_mat_1se$table)
+print(class_error_1se)
+
+probs_1se <- predict(cv_lasso, newx = x_test, s = "lambda.1se", type = "response")
+probs_1se <- probs_1se[,,1]
+colnames(probs_1se) <- levels(y_test)
+```
+
+```{r}
+# Load model results (done for every model)
+model_results <- rbind(model_results, data.frame(
+  Model = "LASSO Min Lambda",
+  Accuracy = accuracy_min,
+  Precision = mean(conf_mat_min$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_min$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_min$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc(y_test, probs_min)
+))
+
+model_results <- rbind(model_results, data.frame(
+  Model = "LASSO 1se Lambda",
+  Accuracy = accuracy_1se,
+  Precision = mean(conf_mat_1se$byClass[,"Precision"], na.rm = TRUE),
+  Recall = mean(conf_mat_1se$byClass[,"Recall"], na.rm = TRUE),
+  F1 = mean(conf_mat_1se$byClass[,"F1"], na.rm = TRUE),
+  AUC = macro_auc(y_test, probs_1se)
+))
+```
+
+```{r}
+# Create confusion matrix (done for every model)
+cm_table <- as.data.frame(conf_mat_min$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "darkorange") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap (LASSO Min Lambda)",
+       x = "Actual Class", y = "Predicted Class")
+```
+```{r}
+cm_table <- as.data.frame(conf_mat_1se$table)
+ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), color = "black", size = 4) +
+  scale_fill_gradient(low = "white", high = "#1f77b4") +
+  theme_minimal() +
+  labs(title = "Confusion Matrix Heatmap for 3P% (LASSO Lambda 1se) 55% Accuracy",
+       x = "Actual Class", y = "Predicted Class")
+```
+
+
+
 ## PCA
 ```{r}
 # Set PCA statistics

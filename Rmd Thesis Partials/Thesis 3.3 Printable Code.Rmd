@@ -491,6 +491,477 @@ ggplot(df_plot, aes(x = Actual, y = Predicted)) +
     plot.title = element_text(hjust = 0.25)
   )
 ```
+```{r}
+model_results <- rbind(model_results, data.frame(
+  Model = "Quadratic OLS (10-fold CV)",
+  RMSE = mean(cv_rmse_quad),
+  MAE = mean(cv_mae_quad),
+  R2 = mean(cv_r2_quad)
+))
+```
+
+```{r}
+# ============================================================
+# PART 1: DIAGNOSTICS ON CROSS-VALIDATION PREDICTIONS
+# ============================================================
+
+# Add residuals to your plot data
+df_plot$Residuals <- df_plot$Actual - df_plot$Predicted
+df_plot$Abs_Residuals <- abs(df_plot$Residuals)
+df_plot$Squared_Residuals <- df_plot$Residuals^2
+
+# 1. Residuals vs Predicted (should show no pattern)
+p1 <- ggplot(df_plot, aes(x = Predicted, y = Residuals)) +
+  geom_point(color = "steelblue", alpha = 0.6) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred") +
+  labs(title = "Residuals vs Predicted Values",
+       x = "Predicted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+# 2. Q-Q plot (check normality of residuals)
+p2 <- ggplot(df_plot, aes(sample = Residuals)) +
+  stat_qq(color = "steelblue", alpha = 0.6) +
+  stat_qq_line(color = "red", linewidth = 1) +
+  labs(title = "Q-Q Plot of Residuals",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles") +
+  theme_minimal()
+
+# 3. Scale-Location plot (check homoscedasticity)
+p3 <- ggplot(df_plot, aes(x = Predicted, y = sqrt(abs(Residuals)))) +
+  geom_point(color = "steelblue", alpha = 0.6) +
+  geom_smooth(method = "loess", se = TRUE, color = "darkred") +
+  labs(title = "Scale-Location Plot",
+       x = "Predicted Values",
+       y = expression(sqrt("|Residuals|"))) +
+  theme_minimal()
+
+# 4. Histogram of residuals
+p4 <- ggplot(df_plot, aes(x = Residuals)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30, 
+                 fill = "steelblue", alpha = 0.7, color = "white") +
+  geom_density(color = "darkred", linewidth = 1) +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df_plot$Residuals), 
+                           sd = sd(df_plot$Residuals)),
+                color = "darkgreen", linewidth = 1, linetype = "dashed") +
+  labs(title = "Distribution of Residuals",
+       x = "Residuals",
+       y = "Density") +
+  theme_minimal()
+
+# Display all diagnostic plots
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+
+
+```
+
+```{r}
+# 5. Residuals by fold (check CV stability)
+fold_performance <- data.frame(
+  Fold = 1:n_folds,
+  RMSE = cv_rmse_quad,
+  MAE = cv_mae_quad,
+  R2 = cv_r2_quad
+)
+
+p5 <- ggplot(fold_performance, aes(x = Fold, y = RMSE)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "darkred", size = 3) +
+  geom_hline(yintercept = mean(cv_rmse_quad), 
+             color = "darkgreen", linetype = "dashed", linewidth = 1) +
+  labs(title = "RMSE by Cross-Validation Fold",
+       subtitle = paste("Mean RMSE:", round(mean(cv_rmse_quad), 4),
+                       "| SD:", round(sd(cv_rmse_quad), 4)),
+       x = "Fold",
+       y = "RMSE") +
+  theme_minimal()
+
+p6 <- ggplot(fold_performance, aes(x = Fold, y = R2)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_point(color = "darkred", size = 3) +
+  geom_hline(yintercept = mean(cv_r2_quad), 
+             color = "darkgreen", linetype = "dashed", linewidth = 1) +
+  labs(title = "R² by Cross-Validation Fold",
+       subtitle = paste("Mean R²:", round(mean(cv_r2_quad), 4),
+                       "| SD:", round(sd(cv_r2_quad), 4)),
+       x = "Fold",
+       y = "R²") +
+  theme_minimal()
+
+grid.arrange(p5, p6, ncol = 2)
+
+# 6. Numerical diagnostics summary
+cat("\n========== CV DIAGNOSTICS SUMMARY ==========\n")
+cat("Mean of residuals:", round(mean(df_plot$Residuals), 6), "(should be ≈ 0)\n")
+cat("Skewness of residuals:", round(moments::skewness(df_plot$Residuals), 4), "(0 = symmetric)\n")
+cat("Kurtosis of residuals:", round(moments::kurtosis(df_plot$Residuals), 4), "(3 = normal)\n\n")
+
+# Shapiro-Wilk test for normality
+shapiro_test <- shapiro.test(df_plot$Residuals)
+cat("Shapiro-Wilk normality test:\n")
+cat("  W =", round(shapiro_test$statistic, 4), ", p-value =", shapiro_test$p.value, "\n")
+cat("  ", ifelse(shapiro_test$p.value > 0.05, "Residuals appear normal ✓", 
+                 "Residuals deviate from normality ✗"), "\n\n")
+
+# Breusch-Pagan test for heteroscedasticity
+cat("CV Fold RMSE stability:\n")
+cat("  Min RMSE:", round(min(cv_rmse_quad), 4), "\n")
+cat("  Max RMSE:", round(max(cv_rmse_quad), 4), "\n")
+cat("  CV of RMSE:", round(sd(cv_rmse_quad)/mean(cv_rmse_quad) * 100, 2), "%\n")
+
+# ============================================================
+# PART 2: DIAGNOSTICS ON FINAL MODEL (fit on all training data)
+# ============================================================
+
+# Fit the final model on complete training data
+train_lq_full <- create_linear_quadratic_features(train_data)
+final_model <- lm(response ~ ., data = train_lq_full)
+
+# Standard R diagnostic plots
+par(mfrow = c(2, 2))
+plot(final_model)
+par(mfrow = c(1, 1))
+
+# Detailed diagnostics
+cat("\n========== FINAL MODEL DIAGNOSTICS ==========\n")
+
+# Influential observations
+cooks_dist <- cooks.distance(final_model)
+influential_obs <- which(cooks_dist > 4/nrow(train_data))
+cat("Number of influential observations:", length(influential_obs), "\n")
+if(length(influential_obs) > 0) {
+  cat("Influential observation indices:", head(influential_obs, 10), "...\n")
+}
+
+# Variance Inflation Factor (multicollinearity)
+cat("\nTop 5 highest VIF values:\n")
+vif_values <- car::vif(final_model)
+print(head(sort(vif_values, decreasing = TRUE), 5))
+
+# Model summary
+cat("\n")
+print(summary(final_model))
+```
+
+
+
+
+```{r}
+# ============================================================
+# PREPARE DATA AND FIT FINAL MODEL
+# ============================================================
+
+# Fit the quadratic OLS model on all training data
+train_lq_full <- create_linear_quadratic_features(train_data)
+final_model <- lm(response ~ ., data = train_lq_full)
+
+# Prepare test data with quadratic features
+test_lq <- create_linear_quadratic_features(test_data)
+
+# Get predictions with prediction intervals
+predictions_with_pi <- predict(final_model, newdata = test_lq, 
+                               interval = "prediction", level = 0.95)
+
+# Get the row indices from test_data to match with per_min_data2
+test_indices <- as.numeric(rownames(test_data))
+
+# Combine with actual values and player names from per_min_data2
+test_results <- data.frame(
+  Index = test_indices,
+  PLAYER = per_min_data2$PLAYER[test_indices],  # Get names using the indices
+  Actual = test_data$response,
+  Predicted = predictions_with_pi[, "fit"],
+  PI_Lower = predictions_with_pi[, "lwr"],
+  PI_Upper = predictions_with_pi[, "upr"]
+)
+
+# Apply min-0 constraint
+test_results$Predicted <- pmax(test_results$Predicted, 0)
+test_results$PI_Lower <- pmax(test_results$PI_Lower, 0)
+test_results$PI_Upper <- pmax(test_results$PI_Upper, 0)
+
+# Verify player names were matched correctly (check first few)
+cat("First 5 test set players with their indices:\n")
+print(head(test_results[, c("Index", "PLAYER", "Actual")], 5))
+
+# ============================================================
+# SELECT TOP 5 AND 10 RANDOM PLAYERS
+# ============================================================
+
+# Top 5 players by actual 3PMPM
+top5 <- test_results[order(test_results$Actual, decreasing = TRUE), ][1:5, ]
+
+# 10 random players (excluding the top 5)
+set.seed(123)  # For reproducibility
+remaining_players <- test_results[!test_results$Index %in% top5$Index, ]
+random10 <- remaining_players[sample(1:nrow(remaining_players), 10), ]
+
+# Combine selected players
+selected_players <- rbind(
+  cbind(top5, Group = "Top 5 Players"),
+  cbind(random10, Group = "Random Players")
+)
+
+# Order players by actual value for plotting
+selected_players$PLAYER <- factor(selected_players$PLAYER, 
+                                   levels = selected_players$PLAYER[order(selected_players$Actual)])
+
+# ============================================================
+# CREATE PREDICTION INTERVAL PLOT
+# ============================================================
+
+p_pi <- ggplot(selected_players, aes(x = PLAYER, y = Predicted, color = Group)) +
+  
+  # Prediction intervals (95% PI)
+  geom_errorbar(aes(ymin = PI_Lower, ymax = PI_Upper), 
+                width = 0.25, linewidth = 1.3, alpha = 0.9) +
+  
+  # Predicted values (diamonds)
+  geom_point(size = 4, shape = 18) +
+  
+  # Actual values (stars)
+  geom_point(aes(y = Actual, shape = "Actual Value"), 
+             size = 4.5, color = "darkred", stroke = 1.2) +
+  
+  # Styling
+  scale_color_manual(values = c("Top 5 Players" = "#2C3E50", 
+                                "Random Players" = "#3498DB")) +
+  scale_shape_manual(values = c("Actual Value" = 8)) +
+  
+  labs(
+    title = "Quadratic OLS: 95% Prediction Intervals for Selected Players",
+    subtitle = "Bars show 95% prediction interval | Red stars (*) show actual values",
+    x = "",
+    y = "3-Pointers Per Minute (3PMPM)",
+    color = "Player Group",
+    shape = ""
+  ) +
+  
+  coord_flip() +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 10, color = "grey40"),
+    axis.text.y = element_text(face = "bold", size = 11),
+    legend.position = "bottom",
+    legend.box = "vertical",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_pi)
+```
+
+```{r}
+# ============================================================
+# PREPARE DATA AND FIT FINAL MODEL
+# ============================================================
+
+# Fit the quadratic OLS model on all training data
+train_lq_full <- create_linear_quadratic_features(train_data)
+final_model <- lm(response ~ ., data = train_lq_full)
+
+# Prepare test data with quadratic features
+test_lq <- create_linear_quadratic_features(test_data)
+
+# Get predictions with 90% prediction intervals (shorter)
+predictions_with_pi <- predict(final_model, newdata = test_lq, 
+                               interval = "prediction", level = 0.90)
+
+# Get the row indices from test_data to match with per_min_data2
+test_indices <- as.numeric(rownames(test_data))
+
+# Combine with actual values and player names from per_min_data2
+test_results <- data.frame(
+  Index = test_indices,
+  PLAYER = per_min_data2$PLAYER[test_indices],
+  Actual = test_data$response,
+  Predicted = predictions_with_pi[, "fit"],
+  PI_Lower = predictions_with_pi[, "lwr"],
+  PI_Upper = predictions_with_pi[, "upr"]
+)
+
+# Apply min-0 constraint
+test_results$Predicted <- pmax(test_results$Predicted, 0)
+test_results$PI_Lower <- pmax(test_results$PI_Lower, 0)
+test_results$PI_Upper <- pmax(test_results$PI_Upper, 0)
+
+# ============================================================
+# SELECT 20 RANDOM PLAYERS
+# ============================================================
+
+set.seed(6767)  # For reproducibility
+random20 <- test_results[sample(1:nrow(test_results), 20), ]
+
+# Order players by actual value (ascending)
+random20 <- random20[order(random20$Actual), ]
+random20$PLAYER <- factor(random20$PLAYER, levels = random20$PLAYER)
+
+# ============================================================
+# CREATE 90% PREDICTION INTERVAL PLOT
+# ============================================================
+
+p_pi_90 <- ggplot(random20, aes(x = PLAYER, y = Predicted)) +
+  
+  # 90% Prediction intervals (shorter)
+  geom_errorbar(aes(ymin = PI_Lower, ymax = PI_Upper), 
+                width = 0.25, linewidth = 1.3, alpha = 0.9, 
+                color = "black") +
+  
+  # Predicted values (diamonds)
+  geom_point(size = 4, shape = 18, color = "black") +
+  
+  # Actual values (5-point stars)
+  geom_point(aes(y = Actual, shape = "Actual Value"), 
+             size = 10, color = "#E74C3C", stroke = 1.2) +
+  
+  # Styling
+  scale_shape_manual(values = c("Actual Value" = 42)) +  
+  
+  labs(
+    title = "Quadratic OLS: 90% Prediction Intervals for Random Players",
+    subtitle = "20 random test players ordered by actual 3PMPM | Red stars = actual values",
+    x = "",
+    y = "3-Pointers Per Minute (3PMPM)",
+    shape = ""
+  ) +
+  
+  coord_flip() +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, hjust = 1),
+    plot.subtitle = element_text(size = 10, color = "grey40"),
+    axis.text.y = element_text(face = "bold", size = 9),
+    legend.position = "bottom",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+print(p_pi_90)
+
+# ============================================================
+# SUMMARY TABLE FOR 90% PI
+# ============================================================
+
+summary_table <- random20 %>%
+  dplyr::select(PLAYER, Actual, Predicted, PI_Lower, PI_Upper) %>%
+  dplyr::mutate(
+    PI_Width = PI_Upper - PI_Lower,
+    Error = Predicted - Actual,
+    Abs_Error = abs(Error),
+    Actual_in_PI = ifelse(Actual >= PI_Lower & Actual <= PI_Upper, 
+                          "✓ Covered", "✗ Outside")
+  )
+
+cat("\n========== 90% PREDICTION INTERVAL SUMMARY ==========\n")
+cat("20 Random Players Ordered by Actual 3PMPM\n")
+cat("Using 90% Prediction Intervals (narrower than 95% or 99%)\n\n")
+print(as.data.frame(summary_table), row.names = FALSE)
+
+# Coverage statistics
+coverage_count <- sum(summary_table$Actual_in_PI == "✓ Covered")
+total_count <- nrow(summary_table)
+cat("\n90% Prediction Interval Coverage:", coverage_count, "/", total_count, 
+    "(", round(coverage_count/total_count * 100, 1), "% )\n")
+cat("Expected coverage: ~90% (18 of 20 players)\n")
+cat("With 90% PI, expect about 2 players to fall outside by chance\n")
+
+# Average PI width
+cat("\nAverage 90% PI width:", round(mean(summary_table$PI_Width), 4), "\n")
+cat("(Compare: 95% PI would be wider, 99% PI would be widest)\n")
+```
+
+```{r}
+# ============================================================
+# RECOMMENDED: PLOT WITH BOTH CI AND PI
+# ============================================================
+
+# Get both intervals for 90% confidence level
+predictions_ci <- predict(final_model, newdata = test_lq, 
+                          interval = "confidence", level = 0.90)
+predictions_pi <- predict(final_model, newdata = test_lq, 
+                          interval = "prediction", level = 0.90)
+
+test_results <- data.frame(
+  Index = test_indices,
+  PLAYER = per_min_data2$PLAYER[test_indices],
+  Actual = test_data$response,
+  Predicted = predictions_ci[, "fit"],
+  CI_Lower = predictions_ci[, "lwr"],
+  CI_Upper = predictions_ci[, "upr"],
+  PI_Lower = predictions_pi[, "lwr"],
+  PI_Upper = predictions_pi[, "upr"]
+)
+
+# Apply min-0 constraint to all
+test_results[, c("Predicted", "CI_Lower", "CI_Upper", "PI_Lower", "PI_Upper")] <- 
+  lapply(test_results[, c("Predicted", "CI_Lower", "CI_Upper", "PI_Lower", "PI_Upper")], 
+         function(x) pmax(x, 0))
+
+# Select random players
+set.seed(3030)
+random20 <- test_results[sample(1:nrow(test_results), 20), ]
+random20 <- random20[order(random20$Actual), ]
+random20$PLAYER <- factor(random20$PLAYER, levels = random20$PLAYER)
+
+# Plot with both intervals
+ggplot(random20, aes(x = PLAYER, y = Predicted)) +
+  
+  # 90% Prediction intervals (wider, lighter)
+  geom_errorbar(aes(ymin = PI_Lower, ymax = PI_Upper), 
+                width = 0.15, linewidth = 0.8, alpha = 0.4, 
+                color = "blue") +
+  
+  # 90% Confidence intervals (narrower, darker)
+  geom_errorbar(aes(ymin = CI_Lower, ymax = CI_Upper), 
+                width = 0.25, linewidth = 1.5, alpha = 0.9, 
+                color = "#2C3E50") +
+  
+  # Predicted values (diamonds)
+  geom_point(size = 3.5, shape = 18, color = "#2C3E50") +
+  
+  # Actual values (5-point stars)
+  geom_point(aes(y = Actual, shape = "Actual Value"), 
+             size = 10, color = "#E74C3C", stroke = 1.2) +
+  
+  scale_shape_manual(values = c("Actual Value" = 42)) +
+  
+  labs(
+    title = "Quadratic OLS: 90% Confidence and Prediction Intervals",
+    subtitle = "Dark bars = 90% CI (mean) | Light bars = 90% PI (individual) | Red stars = actual",
+    x = "",
+    y = "3-Pointers Per Minute (3PMPM)",
+    shape = ""
+  ) +
+  
+  coord_flip() +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 9, color = "grey40"),
+    axis.text.y = element_text(face = "bold", size = 9),
+    legend.position = "bottom",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+# Coverage analysis for both intervals
+random20 <- random20 %>%
+  mutate(
+    In_CI = Actual >= CI_Lower & Actual <= CI_Upper,
+    In_PI = Actual >= PI_Lower & Actual <= PI_Upper
+  )
+
+cat("\n========== INTERVAL COVERAGE COMPARISON ==========\n")
+cat("Confidence Intervals (90%):", sum(random20$In_CI), "/", nrow(random20), 
+    "covered (", round(mean(random20$In_CI)*100, 1), "%)\n")
+cat("Prediction Intervals (90%):", sum(random20$In_PI), "/", nrow(random20), 
+    "covered (", round(mean(random20$In_PI)*100, 1), "%)\n")
+```
 
 
 ```{r}
@@ -543,6 +1014,151 @@ model_results <- rbind(
 )
 ```
 
+```{r}
+# First, perform variable selection ONCE on the full training data
+# (to identify which variables to use consistently across folds)
+
+# Build linear + quadratic data for full training set
+train_lq_full <- create_linear_quadratic_features(train_data)
+
+# Remove response for regsubsets
+x_train_full <- train_lq_full[, setdiff(names(train_lq_full), "response")]
+y_train_full <- train_lq_full$response
+
+# Best subset selection on full training data
+best_subset <- regsubsets(
+  x = x_train_full,
+  y = y_train_full,
+  nvmax = 10, 
+  method = "forward"
+)
+
+# Extract best model size by BIC
+best_summary <- summary(best_subset)
+best_size <- which.min(best_summary$bic)
+
+# Get selected variable names (fixed set for all CV folds)
+best_coef <- coef(best_subset, best_size)
+selected_vars <- names(best_coef)[-1]  # remove intercept
+
+cat("Selected variables:", paste(selected_vars, collapse = ", "), "\n")
+
+# Create formula with selected variables only
+formula_final <- as.formula(
+  paste("response ~", paste(selected_vars, collapse = " + "))
+)
+
+# Initialize storage for CV
+all_actual <- c()
+all_predicted <- c()
+
+# Determine actual number of folds
+n_folds <- length(cv_folds)
+
+cv_rmse_best <- numeric(n_folds)
+cv_mae_best <- numeric(n_folds)
+cv_r2_best <- numeric(n_folds)
+
+for(i in 1:n_folds) {
+  train_fold <- train_data[-cv_folds[[i]], ]
+  valid_fold <- train_data[cv_folds[[i]], ]
+  
+  # Create quadratic features for each fold
+  train_fold_lq <- create_linear_quadratic_features(train_fold)
+  valid_fold_lq <- create_linear_quadratic_features(valid_fold)
+  
+  # Fit model using only the pre-selected variables
+  fold_model <- lm(formula_final, data = train_fold_lq)
+  fold_pred <- predict(fold_model, newdata = valid_fold_lq)
+  fold_pred <- pmax(fold_pred, 0)  # Force minimum of zero
+
+  # Store predictions
+  all_actual <- c(all_actual, valid_fold$response)
+  all_predicted <- c(all_predicted, fold_pred)
+
+  # Calculate metrics
+  cv_rmse_best[i] <- sqrt(mean((fold_pred - valid_fold$response)^2))
+  cv_mae_best[i] <- mean(abs(fold_pred - valid_fold$response))
+  cv_r2_best[i] <- 1 - sum((valid_fold$response - fold_pred)^2) / 
+    sum((valid_fold$response - mean(valid_fold$response))^2)
+}
+
+# Create plot data
+df_plot <- data.frame(
+  Actual = all_actual,
+  Predicted = all_predicted
+)
+
+ggplot(df_plot, aes(x = Actual, y = Predicted)) +
+  
+  # --- Custom axes with arrows ---
+  geom_segment(aes(x = 0, xend = 0.125, y = 0, yend = 0),
+               arrow = arrow(type = "closed", length = unit(0.2, "cm")),
+               linewidth = 0.7, color = "black") +
+  geom_segment(aes(x = 0, xend = 0, y = 0, yend = 0.125),
+               arrow = arrow(type = "closed", length = unit(0.2, "cm")),
+               linewidth = 0.7, color = "black") +
+
+  # --- Points ---
+  geom_point(color = "steelblue", alpha = 0.6) +
+
+  # --- Trend line with legend ---
+  geom_smooth(aes(color = "Trend Line (Best Subset)"),
+            method = "lm", se = FALSE, linetype = "dashed", show.legend = TRUE) +
+
+  # --- 1:1 line with legend ---
+  geom_abline(aes(intercept = 0, slope = 1, color = "Optimal Line"),
+              linetype = "dashed", linewidth = 0.8, show.legend = TRUE) +
+
+  scale_color_manual(
+    name = "Lines",
+    values = c(
+      "Trend Line (Best Subset)" = "blue",
+      "Optimal Line" = "red"
+    )
+  ) +
+
+  # --- Statistics box ---
+  annotate(
+    "label",
+    x = Inf, y = -Inf,
+    hjust = 1.1, vjust = -0.5,
+    label = paste(
+      "RMSE =", round(mean(cv_rmse_best), 4), "\n",
+      "MAE  =", round(mean(cv_mae_best), 4), "\n",
+      "R²   =", round(mean(cv_r2_best), 4)
+    ),
+    size = 4,
+    fill = "white"
+  ) +
+
+  # --- Labels ---
+  labs(
+    title = "Actual vs. Predicted Values of NBA 3PMPM w/ Min-0 Predictions",
+    subtitle = paste("(Best Subset Linear+Quadratic 10-Fold CV |", 
+                    length(selected_vars), "variables selected)"),
+    x = "Actual Response",
+    y = "Predicted Response"
+  ) +
+
+  # --- Theme ---
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.25)
+  )
+```
+
+```{r}
+model_results <- rbind(
+  model_results,
+  data.frame(
+    Model = "Best Subset Linear + Quadratic (10-fold CV)",
+    RMSE = mean(cv_rmse_best),
+    MAE  = mean(cv_mae_best),
+    R2   = mean(cv_r2_best)
+  )
+)
+```
 
 ```{r}
 # 2. GNLR GAUSSIAN MODEL FUNCTION
@@ -769,167 +1385,6 @@ model_results <- rbind(model_results, data.frame(
 ```
 
 
-```{r}
-# 3. APPLY GNLR LOGISTIC MODEL
-# Prepare data matrices
-X_train_mat <- as.matrix(train_data[, -ncol(train_data)])
-X_test_mat <- as.matrix(test_data[, -ncol(test_data)])
-
-# Fit GNLR model with density-based weighting
-gnlr_fit <- gnlr_gaussian(X_train_mat, y_train, 
-                           weight_strategy = "density",
-                           kernel_bandwidth = 0.3)
-
-# Make predictions on test set
-# For test predictions, we need to apply the learned coefficients
-X_test_design <- cbind(1, X_test_mat)
-eta_test <- X_test_design %*% gnlr_fit$coefficients
-p_test <- 1 / (1 + exp(-eta_test))
-
-# Transform back to original scale
-y_min <- min(y_train)
-y_max <- max(y_train)
-gnlr_pred <- p_test * (y_max - y_min) + y_min
-gnlr_pred <- pmax(gnlr_pred,0)
-
-gnlr_metrics <- calculate_metrics(gnlr_pred, y_test)
-
-model_results <- rbind(model_results, data.frame(
-  Model = "GNLR Logistic (Density-weighted)",
-  RMSE = gnlr_metrics[1],
-  MAE = gnlr_metrics[2],
-  R2 = gnlr_metrics[3]
-))
-```
-```{r}
-# 4. QUADRATIC GNLR MODEL
-# Create quadratic feature matrices
-X_train_quad_mat <- as.matrix(train_lq[, -ncol(train_lq)])
-X_test_quad_mat <- as.matrix(test_lq[, -ncol(test_lq)])
-
-# Fit quadratic GNLR
-gnlr_quad_fit <- gnlr_gaussian(X_train_quad_mat, y_train,
-                                weight_strategy = "density",
-                                kernel_bandwidth = 0.3)
-
-# Predict with quadratic GNLR
-X_test_quad_design <- cbind(1, X_test_quad_mat)
-eta_test_quad <- X_test_quad_design %*% gnlr_quad_fit$coefficients
-p_test_quad <- 1 / (1 + exp(-eta_test_quad))
-gnlr_quad_pred <- p_test_quad * (y_max - y_min) + y_min
-gnlr_quad_pred <- pmax(gnlr_quad_pred,0)
-
-gnlr_quad_metrics <- calculate_metrics(gnlr_quad_pred, y_test)
-
-model_results <- rbind(model_results, data.frame(
-  Model = "Quadratic GNLR Logistic",
-  RMSE = gnlr_quad_metrics[1],
-  MAE = gnlr_quad_metrics[2],
-  R2 = gnlr_quad_metrics[3]
-))
-```
-```{r}
-# 5. VISUALIZE WEIGHTS AND DENSITY
-# Plot showing weight distribution based on density
-plot_weight_density <- function(gnlr_fit, y_train, title = "GNLR Density Weighting") {
-  y_scaled <- (y_train - min(y_train)) / (max(y_train) - min(y_train))
-  
-  par(mfrow = c(1, 2))
-  
-  # Plot 1: Weights vs. Predictions
-  plot(gnlr_fit$probabilities, gnlr_fit$weights,
-       xlab = "Predicted Probability", ylab = "Weight",
-       main = paste(title, "\nWeights vs Predictions"),
-       pch = 19, col = rgb(0, 0, 1, 0.5))
-  grid()
-  
-  # Plot 2: Density of predictions with weights
-  dens <- density(gnlr_fit$probabilities, weights = gnlr_fit$weights/sum(gnlr_fit$weights))
-  hist(gnlr_fit$probabilities, breaks = 30, freq = FALSE,
-       main = paste(title, "\nWeighted Density"),
-       xlab = "Predicted Probability", col = "lightblue")
-  lines(dens, col = "red", lwd = 2)
-  
-  par(mfrow = c(1, 1))
-}
-
-```
-```{r}
-# Sort by RMSE
-model_results <- model_results[order(model_results$RMSE), ]
-
-# Print results
-cat("\n=== FINAL MODEL COMPARISON ===\n")
-print(model_results)
-cat("\n")
-```
-```{r}
-# 7. CROSS-VALIDATION FOR GNLR
-set.seed(67)
-cv_folds <- createFolds(y_train, k = 5)
-cv_rmse_gnlr <- numeric(5)
-cv_rmse_gnlr_quad <- numeric(5)
-
-for(i in 1:5) {
-  # Split fold data
-  train_idx <- unlist(cv_folds[-i])
-  valid_idx <- cv_folds[[i]]
-  
-  X_train_fold <- as.matrix(train_data[train_idx, -ncol(train_data)])
-  y_train_fold <- y_train[train_idx]
-  X_valid_fold <- as.matrix(train_data[valid_idx, -ncol(train_data)])
-  y_valid_fold <- y_train[valid_idx]
-  
-  # Regular GNLR
-  gnlr_cv_fit <- gnlr_gaussian(X_train_fold, y_train_fold, 
-                                weight_strategy = "density",
-                                kernel_bandwidth = 0.3)
-  
-  X_valid_design <- cbind(1, X_valid_fold)
-  eta_valid <- X_valid_design %*% gnlr_cv_fit$coefficients
-  p_valid <- 1 / (1 + exp(-eta_valid))
-  y_min_fold <- min(y_train_fold)
-  y_max_fold <- max(y_train_fold)
-  gnlr_cv_pred <- p_valid * (y_max_fold - y_min_fold) + y_min_fold
-  
-  cv_rmse_gnlr[i] <- sqrt(mean((gnlr_cv_pred - y_valid_fold)^2))
-  
-  # Quadratic GNLR
-  train_data_quad_fold <- create_linear_quadratic_features(train_data[train_idx, ])
-  valid_data_quad_fold <- create_linear_quadratic_features(train_data[valid_idx, ])
-  
-  X_train_quad_fold <- as.matrix(train_data_quad_fold[, -ncol(train_data_quad_fold)])
-  X_valid_quad_fold <- as.matrix(valid_data_quad_fold[, -ncol(valid_data_quad_fold)])
-  
-  gnlr_quad_cv_fit <- gnlr_gaussian(X_train_quad_fold, y_train_fold,
-                                     weight_strategy = "density",
-                                     kernel_bandwidth = 0.3)
-  
-  X_valid_quad_design <- cbind(1, X_valid_quad_fold)
-  eta_valid_quad <- X_valid_quad_design %*% gnlr_quad_cv_fit$coefficients
-  p_valid_quad <- 1 / (1 + exp(-eta_valid_quad))
-  gnlr_quad_cv_pred <- p_valid_quad * (y_max_fold - y_min_fold) + y_min_fold
-  
-  cv_rmse_gnlr_quad[i] <- sqrt(mean((gnlr_quad_cv_pred - y_valid_fold)^2))
-}
-
-cat("=== CROSS-VALIDATION RESULTS ===\n")
-cat(sprintf("GNLR Logistic (5-fold CV RMSE): %.4f ± %.4f\n", 
-            mean(cv_rmse_gnlr), sd(cv_rmse_gnlr)))
-cat(sprintf("Quadratic GNLR (5-fold CV RMSE): %.4f ± %.4f\n",
-            mean(cv_rmse_gnlr_quad), sd(cv_rmse_gnlr_quad)))
-```
-```{r}
-# Return coefficients for interpretation
-cat("\n=== TOP 10 COEFFICIENTS (Quadratic GNLR) ===\n")
-coef_df <- data.frame(
-  Variable = c("Intercept", colnames(X_train_quad_mat)),
-  Coefficient = as.numeric(gnlr_quad_fit$coefficients)
-)
-coef_df$Importance <- abs(coef_df$Coefficient)
-print(coef_df[order(-coef_df$Importance), ][1:10, ])
-```
-
 
 
 ```{r}
@@ -958,323 +1413,4 @@ ggplot(data.frame(
     y = "Residuals"
   ) +
   theme_minimal()
-```
-```{r}
-final_ols_model <- lm(response ~ ., data = train_data)
-test_pred <- predict(final_ols_model, newdata = test_data)
-
-# Create a dataframe for plotting
-plot_data <- data.frame(
-  Actual = y_test,
-  Predicted = test_pred,
-  Residual = y_test - test_pred,
-  Abs_Residual = abs(y_test - test_pred)
-)
-
-# Add player names if available
-if("PLAYER" %in% names(per_min_data2)) {
-  plot_data$Player <- per_min_data2$PLAYER[-train_index]
-} else {
-  plot_data$Player <- paste("Player", 1:nrow(plot_data))
-}
-
-# Add cluster info if available
-if("Cluster3Shooting_recordered" %in% names(per_min_data2)) {
-  plot_data$Cluster <- per_min_data2$Cluster3Shooting_recordered[-train_index]
-}
-
-metrics_text <- paste(
-  "<b>Model Performance Metrics</b><br>",
-  "RMSE: ", round(sqrt(mean(plot_data$Residual^2)), 5), "<br>",
-  "MAE: ", round(mean(abs(plot_data$Residual)), 5), "<br>",
-  "R²: ", round(1 - sum(plot_data$Residual^2) / 
-                sum((plot_data$Actual - mean(plot_data$Actual))^2), 4), "<br>",
-  "Correlation: ", round(cor(plot_data$Actual, plot_data$Predicted), 4), "<br>",
-  "Mean Error: ", round(mean(plot_data$Residual), 5), "<br>",
-  "Std Error: ", round(sd(plot_data$Residual), 5), "<br><br>",
-  "<b>Test Set Info</b><br>",
-  "Number of players: ", nrow(plot_data), "<br>",
-  "Actual range: [", round(min(plot_data$Actual), 3), ", ", 
-                    round(max(plot_data$Actual), 3), "]<br>",
-  "Predicted range: [", round(min(plot_data$Predicted), 3), ", ", 
-                      round(max(plot_data$Predicted), 3), "]"
-)
-
-p7 <- plot_ly() %>%
-  add_annotations(
-    text = metrics_text,
-    x = 0.5, y = 0.5,
-    xref = "paper", yref = "paper",
-    showarrow = FALSE,
-    font = list(size = 14),
-    align = "left",
-    bgcolor = "white",
-    bordercolor = "black",
-    borderwidth = 2
-  ) %>%
-  layout(title = "Model Performance Summary",
-         xaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE),
-         yaxis = list(showgrid = FALSE, zeroline = FALSE, showticklabels = FALSE))
-```
-
-
-
-```{r}
-test_index  <- setdiff(seq_len(nrow(per_min_data2)), train_index)
-
-# Build full_data from train/test
-full_data <- rbind(train_data, test_data)
-
-# Fit OLS model on training data
-full_ols_model <- lm(response ~ ., data = train_data)
-full_pred <- predict(full_ols_model, newdata = full_data)
-full_pred <- pmax(full_pred, 0)
-
-
-# Get actual values and residuals
-full_actual <- full_data$response
-full_residuals <- full_actual - full_pred
-full_abs_residuals <- abs(full_residuals)
-
-# Create base plot dataframe
-full_plot_data <- data.frame(
-  Actual      = full_actual,
-  Predicted   = full_pred,
-  Residual    = full_residuals,
-  Abs_Residual= full_abs_residuals
-)
-
-# Attach player names and clusters directly from per_min_data2
-full_plot_data$Player <- per_min_data2$PLAYER[c(train_index, test_index)]
-
-if("Cluster3Shooting_recordered" %in% names(per_min_data2)) {
-  full_plot_data$Cluster <- per_min_data2$Cluster3Shooting_recordered[c(train_index, test_index)]
-}
-
-# Add data split indicator using indices
-full_plot_data$Data_Split <- c(
-  rep("Training", length(train_index)),
-  rep("Test", length(test_index))
-)
-
-
-# Add cluster info if available
-if("Cluster3Shooting_recordered" %in% names(per_min_data2)) {
-  full_plot_data$Cluster <- per_min_data2$Cluster3Shooting_recordered
-}
-
-# Calculate metrics
-rmse_full <- sqrt(mean(full_plot_data$Residual^2))
-r2_full <- 1 - sum(full_plot_data$Residual^2) / 
-  sum((full_plot_data$Actual - mean(full_plot_data$Actual))^2)
-
-# P1: Actual vs Predicted (Full Dataset) - FIXED VERSION
-p1_full <- plot_ly() %>%
-  # Add scatter points
-  add_trace(data = full_plot_data, 
-            x = ~Actual, y = ~Predicted,
-            type = 'scatter', mode = 'markers',
-            color = ~Data_Split,
-            colors = c('blue', 'orange'),
-            marker = list(size = 8, opacity = 0.7),
-            hoverinfo = 'text',
-            text = ~paste('Player: ', Player,
-                         '<br>Split: ', Data_Split,
-                         '<br>Actual: ', round(Actual, 4),
-                         '<br>Predicted: ', round(Predicted, 4),
-                         '<br>Residual: ', round(Residual, 4)),
-            name = ~Data_Split) %>%
-  # Add perfect fit line (separate trace with its own data)
-  add_trace(x = c(min(full_plot_data$Actual), max(full_plot_data$Actual)), 
-            y = c(min(full_plot_data$Actual), max(full_plot_data$Actual)),
-            type = 'scatter', mode = 'lines',
-            line = list(color = 'red', width = 2, dash = 'solid'),
-            name = 'Perfect Fit',
-            showlegend = TRUE) %>%
-  layout(title = 'Actual vs Predicted (Full Dataset OLS)',
-         xaxis = list(title = 'Actual 3PAPM'),
-         yaxis = list(title = 'Predicted 3PAPM'),
-         legend = list(x = 0.02, y = 0.98))
-
-# Add performance metrics annotation
-p1_full <- p1_full %>%
-  add_annotations(
-    text = paste("Full Dataset:<br>RMSE =", round(rmse_full, 5), 
-                "<br>R² =", round(r2_full, 4)),
-    x = 0.98, y = 0.02,
-    xref = "paper", yref = "paper",
-    showarrow = FALSE,
-    font = list(size = 12),
-    align = "right",
-    bgcolor = "rgba(255, 255, 255, 0.8)",
-    bordercolor = "black",
-    borderwidth = 1
-  )
-
-# P2: Color by residual magnitude (Full Dataset) - FIXED VERSION
-p2_full <- plot_ly() %>%
-  add_trace(data = full_plot_data, 
-            x = ~Actual, y = ~Predicted,
-            type = 'scatter', mode = 'markers',
-            marker = list(
-              size = 8, 
-              opacity = 0.8,
-              color = ~Abs_Residual,
-              colorscale = list(c(0, 1), c('lightblue', 'darkblue')),
-              showscale = TRUE,
-              colorbar = list(title = "|Error|")
-            ),
-            hoverinfo = 'text',
-            text = ~paste('Player: ', Player,
-                         '<br>Split: ', Data_Split,
-                         '<br>Actual: ', round(Actual, 4),
-                         '<br>Predicted: ', round(Predicted, 4),
-                         '<br>|Error|: ', round(Abs_Residual, 4)),
-            name = 'Predictions') %>%
-  add_trace(x = c(min(full_plot_data$Actual), max(full_plot_data$Actual)), 
-            y = c(min(full_plot_data$Actual), max(full_plot_data$Actual)),
-            type = 'scatter', mode = 'lines',
-            line = list(color = 'red', width = 2, dash = 'dash'),
-            name = 'Perfect Fit') %>%
-  layout(title = 'Colored by Error Magnitude (Full Dataset)',
-         xaxis = list(title = 'Actual 3PAPM'),
-         yaxis = list(title = 'Predicted 3PAPM'))
-
-# P5: Histogram of residuals (Full Dataset) - SIMPLER VERSION
-# Calculate histogram data manually
-p5_full <- plot_ly(full_plot_data, x = ~Actual, y = ~Predicted, z = ~Abs_Residual,
-              type = 'scatter3d', mode = 'markers',
-              marker = list(size = 5, opacity = 0.8,
-                           color = ~Abs_Residual,
-                           colorscale = 'blues'),
-              hoverinfo = 'text',
-              text = ~paste('Player: ', Player,
-                           '<br>Actual: ', round(Actual, 4),
-                           '<br>Predicted: ', round(Predicted, 4),
-                           '<br>|Error|: ', round(Abs_Residual, 4))) %>%
-  layout(title = '3D: Actual vs Predicted vs Error',
-         scene = list(
-           xaxis = list(title = 'Actual'),
-           yaxis = list(title = 'Predicted'),
-           zaxis = list(title = 'Absolute Error')
-         ))
-```
-
-```{r}
-full_data <- rbind(train_data, test_data)
-
-X_full_mat  <- as.matrix(full_data[, -ncol(full_data)])
-
-# Fit GNLR Gaussian with residual-based weighting
-gnlr_gauss_fit <- gnlr_gaussian(
-  X = X_full_mat,
-  y = y,
-  weight_strategy = "residual",
-  kernel_bandwidth = 0.3
-)
-
-# Predictions on test set
-X_full_design <- cbind(1, X_full_mat)
-full_pred <- full_gnlr_gauss_pred <- as.numeric(X_full_design %*% gnlr_gauss_fit$coefficients)
-
-# Get actual values and residuals
-full_actual <- full_data$response
-full_residuals <- full_actual - full_pred
-full_abs_residuals <- abs(full_residuals)
-
-# Create base plot dataframe
-full_plot_data <- data.frame(
-  Actual      = full_actual,
-  Predicted   = full_pred,
-  Residual    = full_residuals,
-  Abs_Residual= full_abs_residuals
-)
-
-# Attach player names and clusters directly from per_min_data2
-full_plot_data$Player <- per_min_data2$PLAYER[c(train_index, test_index)]
-
-if("Cluster3Shooting_recordered" %in% names(per_min_data2)) {
-  full_plot_data$Cluster <- per_min_data2$Cluster3Shooting_recordered[c(train_index, test_index)]
-}
-
-# Add data split indicator using indices
-full_plot_data$Data_Split <- c(
-  rep("Training", length(train_index)),
-  rep("Test", length(test_index))
-)
-
-
-# Add cluster info if available
-if("Cluster3Shooting_recordered" %in% names(per_min_data2)) {
-  full_plot_data$Cluster <- per_min_data2$Cluster3Shooting_recordered
-}
-
-# Calculate metrics
-rmse_full <- sqrt(mean(full_plot_data$Residual^2))
-r2_full <- 1 - sum(full_plot_data$Residual^2) / 
-  sum((full_plot_data$Actual - mean(full_plot_data$Actual))^2)
-
-# Compute the model trend line (Predicted ~ Actual)
-trend_fit <- lm(Predicted ~ Actual, data = full_plot_data)
-
-# P1: Actual vs Predicted (Full Dataset) - FIXED VERSION
-p3_full <- plot_ly() %>%
-  # Add scatter points
-  add_trace(data = full_plot_data, 
-            x = ~Actual, y = ~Predicted,
-            type = 'scatter', mode = 'markers',
-            color = ~Data_Split,
-            colors = c('blue', 'orange'),
-            marker = list(size = 8, opacity = 0.7),
-            hoverinfo = 'text',
-            text = ~paste('Player: ', Player,
-                         '<br>Split: ', Data_Split,
-                         '<br>Actual: ', round(Actual, 4),
-                         '<br>Predicted: ', round(Predicted, 4),
-                         '<br>Residual: ', round(Residual, 4)),
-            name = ~Data_Split) %>%
-  # Add perfect fit line (separate trace with its own data)
-  add_trace(
-    x = full_plot_data$Actual,
-    y = fitted(trend_fit),
-    type = "scatter",
-    mode = "lines",
-    line = list(color = "green", width = 3),
-    name = "Model Trend"
-  ) %>%
-  layout(title = 'Actual vs Predicted (Full Dataset GNLR Gaussian)',
-         xaxis = list(title = 'Actual 3PAPM'),
-         yaxis = list(title = 'Predicted 3PAPM'),
-         legend = list(x = 0.02, y = 0.98))
-
-# Add performance metrics annotation
-p3_full <- p3_full %>%
-  add_annotations(
-    text = paste("Full Dataset:<br>RMSE =", round(rmse_full, 5), 
-                "<br>R² =", round(r2_full, 4)),
-    x = 0.98, y = 0.02,
-    xref = "paper", yref = "paper",
-    showarrow = FALSE,
-    font = list(size = 12),
-    align = "right",
-    bgcolor = "rgba(255, 255, 255, 0.8)",
-    bordercolor = "black",
-    borderwidth = 1
-  )
-
-p3_full <- p3_full %>% add_trace(x = c(min(full_plot_data$Actual), max(full_plot_data$Actual)), 
-            y = c(min(full_plot_data$Actual), max(full_plot_data$Actual)),
-            type = 'scatter', mode = 'lines',
-            line = list(color = 'red', width = 2, dash = 'solid'),
-            name = 'Perfect Fit',
-            showlegend = TRUE)
-
-```
-
-```{r}
-# Display the plots
-p1_full
-p2_full
-p3_full
-p5_full
 ```
