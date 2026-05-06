@@ -1,0 +1,28 @@
+# MLA Citations for Python Packages
+# Generated: 2026-03-24 11:54:42
+
+## Third-Party Packages
+
+### pandas
+Munro, Rona. *Pandas*. Bloomsbury, 2015. https://doi.org/10.5040/9781784602314.00000002.
+Lerner, Reuven M. *Installing and Setting up the Pandas Library*. O'Reilly Media, Inc., 2024.
+
+### numpy
+Idris, Ivan. *NumPy: Beginner's Guide: Build Efficient, High-Speed Programs Using the High-Performance NumPy Mathematical Library*. Packt Publishing, 2015.
+UConn PAN Contributors. "NumPy." *UConn PAN*, 7 Mar. 2023, https://zeus.phys.uconn.edu/wiki/index.php?title=NumPy&oldid=36359.
+
+### google.colab
+Deza, Alfredo. *What Is Google Colab Notebooks and How Do You Share Them for Data Science Projects?* First ed., Pragmatic AI Solutions, 2022.
+
+### nba_api
+nick-raym. "nba_api: An API Client Package to Access the APIs of NBA.com." *GitHub*, 31 Mar. 2024, https://github.com/nick-raym/nba_api.
+
+### bs4
+Richardson, Leonard. "Beautiful Soup Documentation." *GitHub*, 2007.
+
+## Python Standard Library
+
+### datetime, math, time, random, urllib.request, urllib.error
+Python Software Foundation. *Python Language Reference, version 3.12.12*. 2026, https://docs.python.org/.
+
+*Note: For Python's built-in modules, cite the Python Software Foundation as above.*
